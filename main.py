@@ -487,7 +487,7 @@ def menu_for(role: str):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     tg_user = update.effective_user
     name = display_name(update)
-    config = context.bot_data["config"]
+    config = load_config()
     existing = get_user(tg_user.id)
 
     if existing is None:
