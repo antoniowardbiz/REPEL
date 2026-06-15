@@ -1382,7 +1382,7 @@ NOTION_VERSION = "2022-06-28"
 _NOTION_DB_PROPS = {
     "Request": {"title": {}},
     "Type": {"select": {"options": [{"name": "Custom"}, {"name": "Content reload"}]}},
-    "Content": {"rich_text": {}},
+   ,
     "Details": {"rich_text": {}},
     "Model": {"rich_text": {}},
     "Requested by": {"rich_text": {}},
