@@ -1382,7 +1382,6 @@ NOTION_VERSION = "2022-06-28"
 _NOTION_DB_PROPS = {
     "Request": {"title": {}},
     "Type": {"select": {"options": [{"name": "Custom"}, {"name": "Content reload"}]}},
-   ,
     "Details": {"rich_text": {}},
     "Model": {"rich_text": {}},
     "Requested by": {"rich_text": {}},
@@ -1461,7 +1460,6 @@ def _notion_props(req: sqlite3.Row) -> dict:
     props = {
         "Request": {"title": [{"type": "text", "text": {"content": f"#{req['id']} · {type_label}"}}]},
         "Type": {"select": {"name": type_label}},
-        "Content": {"rich_text": _rt(req["content_type"])},
         "Details": {"rich_text": _rt(req["details"])},
         "Model": {"rich_text": _rt(_name(req["model_id"]))},
         "Requested by": {"rich_text": _rt(_name(req["requester_id"]))},
