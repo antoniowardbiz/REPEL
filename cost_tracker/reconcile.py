@@ -109,8 +109,45 @@ class Problem:
 # Config / env
 # --------------------------------------------------------------------------- #
 def load_config(path: str) -> dict:
-    with open(path, "r", encoding="utf-8") as fh:
-        return json.load(fh)
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            return json.load(fh)
+    except FileNotFoundError:
+        sys.exit(f"Config file not found: {path}")
+    except json.JSONDecodeError as exc:
+        sys.exit(f"config.json is not valid JSON ({exc}). Check for a stray comma or quote.")
+
+
+# Keys the script reads directly; validated up front so a hand-edit that drops
+# one fails with a clear message instead of a deep KeyError.
+_REQUIRED_CONFIG_KEYS = (
+    ("notion", "total_costs_database_id"),
+    ("notion", "alerts_database_id"),
+    ("notion", "api_version"),
+    ("total_costs_properties", "amount"),
+    ("total_costs_properties", "date"),
+    ("total_costs_properties", "title"),
+    ("csv", "input_dir"),
+    ("matching", "date_window_days"),
+    ("matching", "tight_date_window_days"),
+    ("matching", "amount_abs_tolerance_usd"),
+    ("matching", "amount_rel_tolerance"),
+    ("currency", "coingecko_api_base"),
+)
+
+
+def validate_config(cfg: dict) -> None:
+    for keys in _REQUIRED_CONFIG_KEYS:
+        node = cfg
+        for k in keys:
+            if not isinstance(node, dict) or k not in node:
+                sys.exit("config.json is missing required key: " + " -> ".join(keys))
+            node = node[k]
+    pc = cfg.get("period_check", {})
+    if pc.get("enabled"):
+        for k in ("gap_abs_threshold_usd", "gap_rel_threshold"):
+            if k not in pc:
+                sys.exit(f"config.json: period_check is enabled but missing '{k}'.")
 
 
 def require_token() -> str:
@@ -244,6 +281,20 @@ def parse_exodus_csv(path: str, verbose: bool = False) -> list[Payment]:
         c_orderid = col("ORDERID", "ORDER", "EXCHANGEID")
         c_note = col("PERSONALNOTE", "NOTE", "NOTES", "MEMO", "LABEL", "COMMENT")
 
+        # If the essential columns are absent, this isn't a recognised Exodus
+        # transaction export — say so loudly instead of silently finding nothing.
+        if c_date is None or c_out_amt is None:
+            missing = []
+            if c_date is None:
+                missing.append("DATE")
+            if c_out_amt is None:
+                missing.append("OUTAMOUNT/COINAMOUNT")
+            print(f"  ⚠ {os.path.basename(path)} doesn't look like an Exodus "
+                  f"'Export Transactions' CSV (missing column(s): {', '.join(missing)}); "
+                  f"detected columns: {', '.join(reader.fieldnames)}")
+            return payments
+
+        skipped_no_date = 0
         for raw_row in reader:
             row = {k: (v or "") for k, v in raw_row.items()}
             tx_type = _pick(row, c_type) if c_type else ""
@@ -272,6 +323,7 @@ def parse_exodus_csv(path: str, verbose: bool = False) -> list[Payment]:
 
             when = _parse_date(_pick(row, c_date)) if c_date else None
             if when is None:
+                skipped_no_date += 1
                 if verbose:
                     print(f"  ! skipping row with unparseable date in {os.path.basename(path)}")
                 continue
@@ -286,6 +338,9 @@ def parse_exodus_csv(path: str, verbose: bool = False) -> list[Payment]:
                 tx_url=_pick(row, c_txurl) if c_txurl else "",
                 note=_pick(row, c_note) if c_note else "",
             ))
+    if skipped_no_date and not verbose:
+        print(f"  ⚠ {skipped_no_date} row(s) in {os.path.basename(path)} skipped "
+              f"(unreadable date).")
     if verbose:
         print(f"  parsed {len(payments)} outgoing payment(s) from {os.path.basename(path)}")
     return payments
@@ -306,6 +361,11 @@ def collect_payments(cfg: dict, explicit_csv: Optional[str], verbose: bool) -> l
     for path in paths:
         for p in parse_exodus_csv(path, verbose=verbose):
             merged[p.key] = p     # later files win; de-dups across full-history exports
+
+    if paths and not merged:
+        print(f"⚠ Read {len(paths)} CSV file(s) but extracted 0 outgoing payments. "
+              "If these are Exodus exports, re-run with --verbose to see the detected "
+              "columns, or confirm the file is the 'Export Transactions' CSV.")
 
     payments = list(merged.values())
 
@@ -672,6 +732,12 @@ def write_alerts(notion: Notion, alerts_db: str, problems: list[Problem],
     problem_keys = {(p.key, p.kind) for p in problems}
     created = skipped = resolved = 0
 
+    new_count = sum(1 for prob in problems if (prob.key, prob.kind) not in existing)
+    if new_count > 500 and not dry_run:
+        print(f"  ⚠ {new_count} new alerts to write; at Notion's rate limit this can take "
+              "several minutes. To shrink a first-run backlog, set reconcile.start_date "
+              "in config.json and re-run.")
+
     for prob in problems:
         ident = (prob.key, prob.kind)
         if ident in existing:
@@ -722,6 +788,7 @@ def main() -> int:
     args = ap.parse_args()
 
     cfg = load_config(args.config)
+    validate_config(cfg)
     session = requests.Session()
 
     print("Exodus -> Notion cost reconciler")
@@ -766,10 +833,17 @@ def main() -> int:
         print("Discrepancies: 0 - everything reconciles ✔")
 
     resolvable_keys = {p.key for p in payments}
-    stats = write_alerts(
-        notion, cfg["notion"]["alerts_database_id"], problems,
-        resolvable_keys, args.dry_run, args.verbose,
-    )
+    try:
+        stats = write_alerts(
+            notion, cfg["notion"]["alerts_database_id"], problems,
+            resolvable_keys, args.dry_run, args.verbose,
+        )
+    except RuntimeError as exc:
+        sys.exit(
+            f"{exc}\n\nMost likely the Notion integration has not been granted access "
+            "to the Payment Reconciliation Alerts database. Open it in Notion -> "
+            "'...' menu -> Connections -> add your integration."
+        )
     print("-" * 40)
     print(f"Alerts created: {stats['created']}  "
           f"already-known: {stats['skipped']}  auto-resolved: {stats['resolved']}"
