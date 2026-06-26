@@ -14,15 +14,17 @@ database. It does NOT auto-log costs. Instead it raises an alert in the
     logged in Total Costs.
 
 Crypto amounts are converted to USD at the payment date (stablecoins are
-treated as $1; everything else uses CoinGecko historical prices) so they can
-be compared against the dollar amounts in the tracker.
+treated as $1; everything else uses Coinbase's keyless historical spot price,
+falling back to CoinGecko) so they can be compared against the dollar amounts
+in the tracker.
 
-Alerts are de-duplicated by transaction id, and an Open alert is flipped to
-Resolved automatically once the tracker catches up.
+Alerts are de-duplicated by transaction id, an Open alert is flipped to
+Resolved automatically once the tracker catches up, and an alert whose USD
+value changes (e.g. a previously "Unpriced" one) is updated in place.
 
 Secrets come from the environment, never the config file:
   NOTION_TOKEN        (required) - Notion internal integration token.
-  COINGECKO_API_KEY   (optional) - CoinGecko Demo/Pro key for higher limits.
+  COINGECKO_API_KEY   (optional) - CoinGecko Demo/Pro key (fallback source only).
 
 Usage:
   python cost_tracker/reconcile.py                 # normal run
@@ -390,6 +392,7 @@ class Pricer:
         self.cfg = cfg["currency"]
         self.session = session
         self.base = self.cfg["coingecko_api_base"].rstrip("/")
+        self.coinbase_base = self.cfg.get("coinbase_api_base", "https://api.coinbase.com/v2").rstrip("/")
         self.stable = {s.upper() for s in self.cfg.get("stablecoins", [])}
         self.ids = {k.upper(): v for k, v in self.cfg.get("coingecko_ids", {}).items()}
         self.api_key = os.environ.get("COINGECKO_API_KEY", "").strip()
@@ -431,19 +434,45 @@ class Pricer:
         if ck in self._cache:
             return self._cache[ck]
 
-        coin_id = self._resolve_id(symbol)
-        if not coin_id:
-            self.warnings.append(f"no CoinGecko id for {symbol}")
-            self._cache[ck] = None
-            return None
+        # Primary: Coinbase keyless historical spot price (reliable, no API key).
+        price = self._coinbase_usd(symbol, when)
 
-        url = f"{self.base}/coins/{coin_id}/history"
-        params = {"date": when.strftime("%d-%m-%Y"), "localization": "false"}
-        price = self._get_price(url, params)
+        # Fallback: CoinGecko historical (honours COINGECKO_API_KEY if set).
+        if price is None:
+            coin_id = self._resolve_id(symbol)
+            if coin_id:
+                url = f"{self.base}/coins/{coin_id}/history"
+                params = {"date": when.strftime("%d-%m-%Y"), "localization": "false"}
+                price = self._get_price(url, params)
+
         self._cache[ck] = price
         if price is None:
             self.warnings.append(f"no price for {symbol} on {when.isoformat()}")
         return price
+
+    def _coinbase_usd(self, symbol: str, when: date) -> Optional[float]:
+        """Coinbase spot price for SYMBOL-USD on a given date. No API key needed.
+        Returns None on 404 (pair not listed) so the caller can fall back."""
+        url = f"{self.coinbase_base}/prices/{symbol}-USD/spot"
+        params = {"date": when.strftime("%Y-%m-%d")}
+        for attempt in range(4):
+            try:
+                r = self.session.get(url, params=params, timeout=30)
+            except requests.RequestException:
+                time.sleep(1 + attempt)
+                continue
+            if r.status_code == 429:
+                time.sleep(2 * (attempt + 1))
+                continue
+            if r.status_code == 404:
+                return None
+            if not r.ok:
+                return None
+            try:
+                return float(r.json()["data"]["amount"])
+            except (KeyError, TypeError, ValueError):
+                return None
+        return None
 
     def _get_price(self, url: str, params: dict) -> Optional[float]:
         for attempt in range(5):
@@ -690,21 +719,24 @@ def _month_last_day(month: str) -> date:
 
 
 # --------------------------------------------------------------------------- #
-# Alert writing (with de-dup + auto-resolve)
+# Alert writing (with de-dup + auto-resolve + value backfill)
 # --------------------------------------------------------------------------- #
 def _txt(value: str) -> dict:
     return {"rich_text": [{"text": {"content": value[:2000]}}]} if value else {"rich_text": []}
 
 
-def build_alert_properties(prob: Problem) -> dict:
+def build_alert_properties(prob: Problem, include_status: bool = True) -> dict:
     props: dict = {
         "Alert": {"title": [{"text": {"content": prob.title[:2000]}}]},
         "Type": {"select": {"name": prob.kind}},
-        "Status": {"select": {"name": "Open"}},
         "Tx ID": _txt(prob.key),
         "Details": _txt(prob.details),
         "Currency": _txt(prob.currency),
     }
+    # Status is only set when creating a row; updates must not clobber a user's
+    # Ignored/Resolved choice.
+    if include_status:
+        props["Status"] = {"select": {"name": "Open"}}
     if prob.amount_usd is not None:
         props["Amount (USD)"] = {"number": round(prob.amount_usd, 2)}
     if prob.tracked_usd is not None:
@@ -720,7 +752,8 @@ def build_alert_properties(prob: Problem) -> dict:
 
 def write_alerts(notion: Notion, alerts_db: str, problems: list[Problem],
                  resolvable_keys: set[str], dry_run: bool, verbose: bool) -> dict:
-    """Create new alerts, skip duplicates, auto-resolve fixed ones."""
+    """Create new alerts, update changed ones (e.g. a now-priced value),
+    skip unchanged duplicates, and auto-resolve fixed ones."""
     existing_pages = notion.query_all(alerts_db)
     existing: dict[tuple[str, str], dict] = {}
     for pg in existing_pages:
@@ -730,7 +763,7 @@ def write_alerts(notion: Notion, alerts_db: str, problems: list[Problem],
             existing[(key, kind)] = pg
 
     problem_keys = {(p.key, p.kind) for p in problems}
-    created = skipped = resolved = 0
+    created = skipped = resolved = updated = 0
 
     new_count = sum(1 for prob in problems if (prob.key, prob.kind) not in existing)
     if new_count > 500 and not dry_run:
@@ -741,10 +774,28 @@ def write_alerts(notion: Notion, alerts_db: str, problems: list[Problem],
     for prob in problems:
         ident = (prob.key, prob.kind)
         if ident in existing:
-            status = prop_select(existing[ident], "Status")
-            skipped += 1
-            if verbose:
-                print(f"  = already alerted ({status}): {prob.title}")
+            pg = existing[ident]
+            status = prop_select(pg, "Status")
+            old_amount = prop_number(pg, "Amount (USD)")
+            new_amount = round(prob.amount_usd, 2) if prob.amount_usd is not None else None
+            # Update in place when the USD value materially changed — chiefly a
+            # previously "Unpriced" ($0) alert that now has a real figure. Never
+            # touch an alert the user has Ignored.
+            changed = (
+                new_amount is not None
+                and (old_amount is None or abs((old_amount or 0.0) - new_amount) >= 1.0)
+            )
+            if changed and status != "Ignored":
+                if dry_run:
+                    print(f"  $ WOULD UPDATE -> ${new_amount:,.2f}: {prob.title}")
+                else:
+                    notion.update_properties(pg["id"], build_alert_properties(prob, include_status=False))
+                    print(f"  $ updated -> ${new_amount:,.2f}: {prob.title}")
+                updated += 1
+            else:
+                skipped += 1
+                if verbose:
+                    print(f"  = already alerted ({status}): {prob.title}")
             continue
         if dry_run:
             print(f"  + WOULD CREATE [{prob.kind}] {prob.title}")
@@ -773,7 +824,7 @@ def write_alerts(notion: Notion, alerts_db: str, problems: list[Problem],
         resolved += 1
         print(f"  ~ resolved: {prop_title(pg, 'Alert')}")
 
-    return {"created": created, "skipped": skipped, "resolved": resolved}
+    return {"created": created, "skipped": skipped, "resolved": resolved, "updated": updated}
 
 
 # --------------------------------------------------------------------------- #
@@ -845,7 +896,7 @@ def main() -> int:
             "'...' menu -> Connections -> add your integration."
         )
     print("-" * 40)
-    print(f"Alerts created: {stats['created']}  "
+    print(f"Alerts created: {stats['created']}  updated: {stats['updated']}  "
           f"already-known: {stats['skipped']}  auto-resolved: {stats['resolved']}"
           + ("   (dry run - nothing written)" if args.dry_run else ""))
     return 0
