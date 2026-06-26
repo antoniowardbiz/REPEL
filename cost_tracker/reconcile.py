@@ -1,0 +1,943 @@
+#!/usr/bin/env python3
+"""Exodus -> Notion cost reconciler.
+
+Checks the payments that left your wallet against the **Total Costs** Notion
+database and raises an alert in the **Payment Reconciliation Alerts** database
+whenever one is:
+
+  * Untracked Payment - money left the wallet but no matching row exists.
+  * Amount Mismatch   - a cost row sits next to the date but the USD amount is
+    nowhere near what actually left.
+  * Period Gap        - over a whole month, more (USD) left than is logged.
+
+Two payment SOURCES (set "source" in config.json):
+  * "ethereum" - fully automated watcher. Reads outgoing USDT (ERC-20)
+    transfers straight from your address on-chain. No CSV, no manual export.
+  * "csv"      - reads Exodus "Export Transactions" CSV files from data/exodus/.
+
+Crypto amounts are converted to USD at the payment date (stablecoins = $1;
+everything else via Coinbase, then CoinGecko). Alerts are de-duplicated, an
+Open alert auto-resolves once the tracker catches up, and a previously
+"Unpriced" alert is updated in place once a value is found.
+
+Secrets come from the environment, never the config file:
+  NOTION_TOKEN        (required) - Notion internal integration token.
+  ETHERSCAN_API_KEY   (optional) - Etherscan key; without it the watcher uses
+                                   the keyless Blockscout API.
+  COINGECKO_API_KEY   (optional) - CoinGecko Demo/Pro key (price fallback only).
+
+Usage:
+  python cost_tracker/reconcile.py                 # normal run
+  python cost_tracker/reconcile.py --dry-run       # report only, write nothing
+  python cost_tracker/reconcile.py --csv path.csv  # force a specific CSV file
+  python cost_tracker/reconcile.py --verbose
+"""
+
+from __future__ import annotations
+
+import argparse
+import csv
+import glob
+import hashlib
+import json
+import os
+import sys
+import time
+from dataclasses import dataclass, field
+from datetime import date, datetime, timedelta, timezone
+from collections import defaultdict
+from typing import Optional
+
+try:
+    import requests
+except ImportError:  # pragma: no cover
+    sys.exit("Missing dependency: run `pip install -r cost_tracker/requirements.txt`")
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+REPO_ROOT = os.path.dirname(HERE)
+DEFAULT_CONFIG = os.path.join(HERE, "config.json")
+NOTION_BASE = "https://api.notion.com/v1"
+
+
+# --------------------------------------------------------------------------- #
+# Data models
+# --------------------------------------------------------------------------- #
+@dataclass
+class Payment:
+    """An outgoing payment that left the wallet."""
+    when: date
+    currency: str
+    amount: float            # absolute crypto amount sent
+    fee: float
+    fee_currency: str
+    txid: str
+    tx_url: str
+    note: str
+    usd: Optional[float] = None  # filled in by pricing
+
+    @property
+    def key(self) -> str:
+        """Stable de-dup key for this payment."""
+        if self.txid:
+            return self.txid
+        raw = f"{self.when.isoformat()}|{self.currency}|{self.amount:.10f}"
+        return "noid-" + hashlib.sha1(raw.encode()).hexdigest()[:16]
+
+
+@dataclass
+class TrackerRow:
+    """A row in the Total Costs Notion database."""
+    when: Optional[date]
+    amount_usd: float
+    title: str
+    url: str
+
+
+@dataclass
+class Problem:
+    kind: str                # "Untracked Payment" | "Amount Mismatch" | "Period Gap"
+    key: str                 # de-dup key (txid or PERIOD-YYYY-MM)
+    title: str
+    amount_usd: float
+    when: Optional[date]
+    details: str
+    tracked_usd: Optional[float] = None
+    exodus_amount: Optional[float] = None
+    currency: str = ""
+    tx_url: str = ""
+
+
+# --------------------------------------------------------------------------- #
+# Config / env
+# --------------------------------------------------------------------------- #
+def load_config(path: str) -> dict:
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            return json.load(fh)
+    except FileNotFoundError:
+        sys.exit(f"Config file not found: {path}")
+    except json.JSONDecodeError as exc:
+        sys.exit(f"config.json is not valid JSON ({exc}). Check for a stray comma or quote.")
+
+
+_REQUIRED_CONFIG_KEYS = (
+    ("notion", "total_costs_database_id"),
+    ("notion", "alerts_database_id"),
+    ("notion", "api_version"),
+    ("total_costs_properties", "amount"),
+    ("total_costs_properties", "date"),
+    ("total_costs_properties", "title"),
+    ("matching", "date_window_days"),
+    ("matching", "tight_date_window_days"),
+    ("matching", "amount_abs_tolerance_usd"),
+    ("matching", "amount_rel_tolerance"),
+    ("currency", "coingecko_api_base"),
+)
+
+
+def validate_config(cfg: dict) -> None:
+    for keys in _REQUIRED_CONFIG_KEYS:
+        node = cfg
+        for k in keys:
+            if not isinstance(node, dict) or k not in node:
+                sys.exit("config.json is missing required key: " + " -> ".join(keys))
+            node = node[k]
+    source = cfg.get("source", "csv").lower()
+    if source == "ethereum":
+        eth = cfg.get("ethereum")
+        if not isinstance(eth, dict) or not eth.get("address") or not eth.get("usdt_contract"):
+            sys.exit("config.json: source is 'ethereum' but 'ethereum.address' / "
+                     "'ethereum.usdt_contract' is missing.")
+    elif source == "csv":
+        if not isinstance(cfg.get("csv"), dict) or "input_dir" not in cfg["csv"]:
+            sys.exit("config.json: source is 'csv' but 'csv.input_dir' is missing.")
+    pc = cfg.get("period_check", {})
+    if pc.get("enabled"):
+        for k in ("gap_abs_threshold_usd", "gap_rel_threshold"):
+            if k not in pc:
+                sys.exit(f"config.json: period_check is enabled but missing '{k}'.")
+
+
+def require_token() -> str:
+    token = os.environ.get("NOTION_TOKEN", "").strip()
+    if not token:
+        sys.exit(
+            "NOTION_TOKEN is not set.\n"
+            "Locally:  export NOTION_TOKEN='ntn_...'\n"
+            "In GitHub Actions: add it under Settings > Secrets and variables > Actions."
+        )
+    return token
+
+
+def _parse_date(raw: str) -> Optional[date]:
+    if not raw:
+        return None
+    raw = raw.strip()
+    iso = raw.replace("Z", "")
+    if "+" in iso:
+        iso = iso.split("+", 1)[0]
+    for candidate in (raw, iso):
+        for fmt in _DATE_FORMATS:
+            try:
+                return datetime.strptime(candidate, fmt).date()
+            except ValueError:
+                continue
+    try:
+        return datetime.fromisoformat(raw.replace("Z", "+00:00")).date()
+    except ValueError:
+        return None
+
+
+_DATE_FORMATS = (
+    "%Y-%m-%dT%H:%M:%S.%fZ",
+    "%Y-%m-%dT%H:%M:%SZ",
+    "%Y-%m-%dT%H:%M:%S",
+    "%Y-%m-%d %H:%M:%S",
+    "%Y-%m-%d %H:%M",
+    "%Y-%m-%d",
+    "%m/%d/%Y %H:%M:%S",
+    "%m/%d/%Y %H:%M",
+    "%m/%d/%Y",
+    "%d/%m/%Y",
+)
+
+
+def _filter_payments(payments: list[Payment], cfg: dict) -> list[Payment]:
+    """Apply the start_date / ignore_currencies filters and sort by date."""
+    rc = cfg.get("reconcile", {})
+    start_raw = rc.get("start_date")
+    start = _parse_date(start_raw) if start_raw else None
+    ignore = {c.upper() for c in rc.get("ignore_currencies", [])}
+    if start:
+        payments = [p for p in payments if p.when >= start]
+    if ignore:
+        payments = [p for p in payments if p.currency not in ignore]
+    payments.sort(key=lambda p: p.when)
+    return payments
+
+
+# --------------------------------------------------------------------------- #
+# Source 1: Ethereum on-chain watcher (outgoing USDT ERC-20 transfers)
+# --------------------------------------------------------------------------- #
+def _http_get_json(session: requests.Session, url: str, params: dict,
+                   headers: Optional[dict] = None, attempts: int = 4) -> Optional[dict]:
+    for i in range(attempts):
+        try:
+            r = session.get(url, params=params, headers=headers or {}, timeout=30)
+        except requests.RequestException:
+            time.sleep(1 + i)
+            continue
+        if r.status_code == 429:
+            time.sleep(2 * (i + 1))
+            continue
+        if not r.ok:
+            return None
+        try:
+            return r.json()
+        except ValueError:
+            return None
+    return None
+
+
+def _fetch_erc20_transfers(addr: str, contract: str, eth_cfg: dict,
+                           session: requests.Session, verbose: bool) -> list[dict]:
+    """Return Etherscan-compatible ERC-20 transfer dicts for addr+contract.
+    Tries Etherscan (if ETHERSCAN_API_KEY is set) then keyless Blockscout."""
+    api_key = os.environ.get("ETHERSCAN_API_KEY", "").strip()
+    if api_key:
+        url = eth_cfg.get("etherscan_api_base", "https://api.etherscan.io/v2/api")
+        params = {"chainid": "1", "module": "account", "action": "tokentx",
+                  "contractaddress": contract, "address": addr,
+                  "page": "1", "offset": "10000", "sort": "desc", "apikey": api_key}
+        data = _http_get_json(session, url, params)
+        if data and isinstance(data.get("result"), list):
+            return data["result"]
+        if verbose:
+            print("  ! Etherscan returned no usable result; falling back to Blockscout")
+    url = eth_cfg.get("blockscout_api_base", "https://eth.blockscout.com/api")
+    params = {"module": "account", "action": "tokentx",
+              "address": addr, "contractaddress": contract, "sort": "desc"}
+    data = _http_get_json(session, url, params)
+    if data and isinstance(data.get("result"), list):
+        return data["result"]
+    if verbose:
+        print(f"  ! could not fetch transfers (Etherscan/Blockscout both empty); "
+              f"raw response: {str(data)[:200]}")
+    return []
+
+
+def collect_eth_payments(cfg: dict, session: requests.Session, verbose: bool) -> list[Payment]:
+    eth_cfg = cfg["ethereum"]
+    addr = eth_cfg["address"].strip().lower()
+    contract = eth_cfg["usdt_contract"].strip().lower()
+    default_decimals = int(eth_cfg.get("usdt_decimals", 6))
+    symbol = str(eth_cfg.get("symbol", "USDT")).upper()
+
+    rows = _fetch_erc20_transfers(addr, contract, eth_cfg, session, verbose)
+    merged: dict[str, Payment] = {}
+    for t in rows:
+        try:
+            if str(t.get("from", "")).lower() != addr:
+                continue  # only OUTGOING transfers (money leaving the wallet)
+            row_contract = str(t.get("contractAddress", "")).lower()
+            if row_contract and row_contract != contract:
+                continue
+            raw = int(str(t.get("value", "0")))
+            dec = int(t.get("tokenDecimal") or default_decimals)
+            amount = raw / (10 ** dec)
+            ts = int(t.get("timeStamp") or t.get("timestamp") or 0)
+            when = datetime.fromtimestamp(ts, timezone.utc).date()
+            txid = str(t.get("hash", ""))
+            to = str(t.get("to", ""))
+        except (ValueError, TypeError):
+            continue
+        if amount <= 0 or not txid:
+            continue
+        note = f"to {to[:8]}…{to[-6:]}" if len(to) > 16 else (f"to {to}" if to else "")
+        merged[txid] = Payment(
+            when=when, currency=symbol, amount=amount, fee=0.0, fee_currency="ETH",
+            txid=txid, tx_url=f"https://etherscan.io/tx/{txid}", note=note,
+        )
+    payments = list(merged.values())
+    if verbose:
+        print(f"  fetched {len(payments)} outgoing {symbol} transfer(s) from {addr}")
+    return _filter_payments(payments, cfg)
+
+
+# --------------------------------------------------------------------------- #
+# Source 2: Exodus CSV parsing
+# --------------------------------------------------------------------------- #
+def _norm_header(name: str) -> str:
+    return "".join(ch for ch in name.upper() if ch.isalnum())
+
+
+def _pick(row: dict, *candidates: str) -> str:
+    for c in candidates:
+        if c in row and row[c] not in (None, ""):
+            return str(row[c]).strip()
+    return ""
+
+
+def _to_float(raw: str) -> float:
+    if not raw:
+        return 0.0
+    cleaned = raw.replace(",", "").replace("$", "").strip()
+    try:
+        return float(cleaned)
+    except ValueError:
+        return 0.0
+
+
+def _classify_type(raw_type: str) -> str:
+    t = (raw_type or "").lower().strip()
+    if "fail" in t:
+        return "failed"
+    if any(w in t for w in ("exchange", "swap", "trade", "convert")):
+        return "internal"
+    if any(w in t for w in ("stake", "unstake", "claim", "reward", "airdrop", "mining", "mint", "earn")):
+        return "staking"
+    if any(w in t for w in ("deposit", "receive", "incoming")):
+        return "incoming"
+    if any(w in t for w in ("withdraw", "send", "sent", "payment", "spend", "spent")):
+        return "withdrawal"
+    return "unknown"
+
+
+def _split_amount_currency(raw: str) -> tuple[str, str]:
+    raw = (raw or "").strip()
+    if " " in raw:
+        num, _, sym = raw.partition(" ")
+        return num.strip(), sym.strip().upper()
+    return raw, ""
+
+
+def parse_exodus_csv(path: str, verbose: bool = False) -> list[Payment]:
+    payments: list[Payment] = []
+    with open(path, "r", encoding="utf-8-sig", newline="") as fh:
+        reader = csv.DictReader(fh)
+        if not reader.fieldnames:
+            return payments
+        header_map = {_norm_header(h): h for h in reader.fieldnames}
+
+        def col(*norm_names: str) -> Optional[str]:
+            for n in norm_names:
+                if n in header_map:
+                    return header_map[n]
+            return None
+
+        c_date = col("DATE", "TIME", "TIMESTAMP", "DATETIME")
+        c_type = col("TYPE", "TRANSACTIONTYPE")
+        c_out_amt = col("OUTAMOUNT", "COINAMOUNT", "AMOUNT", "SENTAMOUNT")
+        c_out_cur = col("OUTCURRENCY", "CURRENCY", "COIN", "ASSET", "SYMBOL")
+        c_fee_amt = col("FEEAMOUNT", "FEE", "NETWORKFEE")
+        c_fee_cur = col("FEECURRENCY", "FEECOIN")
+        c_txid = col("OUTTXID", "TXID", "TXHASH", "TRANSACTIONID", "TXIDOUT")
+        c_txurl = col("OUTTXURL", "TXURL", "EXPLORERURL", "LINK")
+        c_in_amt = col("INAMOUNT", "RECEIVEDAMOUNT")
+        c_orderid = col("ORDERID", "ORDER", "EXCHANGEID")
+        c_note = col("PERSONALNOTE", "NOTE", "NOTES", "MEMO", "LABEL", "COMMENT")
+
+        if c_date is None or c_out_amt is None:
+            missing = []
+            if c_date is None:
+                missing.append("DATE")
+            if c_out_amt is None:
+                missing.append("OUTAMOUNT/COINAMOUNT")
+            print(f"  ⚠ {os.path.basename(path)} doesn't look like an Exodus "
+                  f"'Export Transactions' CSV (missing column(s): {', '.join(missing)}); "
+                  f"detected columns: {', '.join(reader.fieldnames)}")
+            return payments
+
+        skipped_no_date = 0
+        for raw_row in reader:
+            row = {k: (v or "") for k, v in raw_row.items()}
+            tx_type = _pick(row, c_type) if c_type else ""
+            out_amount_raw = _pick(row, c_out_amt) if c_out_amt else ""
+            currency = (_pick(row, c_out_cur) if c_out_cur else "").upper()
+            if not currency:
+                out_amount_raw, embedded = _split_amount_currency(out_amount_raw)
+                currency = embedded
+            out_amount = _to_float(out_amount_raw)
+            in_amount = _to_float(_pick(row, c_in_amt)) if c_in_amt else 0.0
+            orderid = _pick(row, c_orderid) if c_orderid else ""
+            cls = _classify_type(tx_type)
+
+            is_outgoing = (
+                out_amount != 0
+                and in_amount == 0
+                and not orderid
+                and cls in ("withdrawal", "unknown")
+            )
+            if not is_outgoing:
+                continue
+
+            when = _parse_date(_pick(row, c_date)) if c_date else None
+            if when is None:
+                skipped_no_date += 1
+                if verbose:
+                    print(f"  ! skipping row with unparseable date in {os.path.basename(path)}")
+                continue
+
+            payments.append(Payment(
+                when=when,
+                currency=currency,
+                amount=abs(out_amount),
+                fee=abs(_to_float(_pick(row, c_fee_amt))) if c_fee_amt else 0.0,
+                fee_currency=(_pick(row, c_fee_cur) if c_fee_cur else "").upper(),
+                txid=_pick(row, c_txid) if c_txid else "",
+                tx_url=_pick(row, c_txurl) if c_txurl else "",
+                note=_pick(row, c_note) if c_note else "",
+            ))
+    if skipped_no_date and not verbose:
+        print(f"  ⚠ {skipped_no_date} row(s) in {os.path.basename(path)} skipped (unreadable date).")
+    if verbose:
+        print(f"  parsed {len(payments)} outgoing payment(s) from {os.path.basename(path)}")
+    return payments
+
+
+def collect_csv_payments(cfg: dict, explicit_csv: Optional[str], verbose: bool) -> list[Payment]:
+    if explicit_csv:
+        paths = [explicit_csv]
+    else:
+        input_dir = os.path.join(REPO_ROOT, cfg["csv"]["input_dir"])
+        paths = sorted(glob.glob(os.path.join(input_dir, "*.csv")))
+    if not paths:
+        print("No CSV files found to reconcile. Export from Exodus and drop the "
+              f"file into {cfg['csv']['input_dir']}/ then run again.")
+        return []
+
+    merged: dict[str, Payment] = {}
+    for path in paths:
+        for p in parse_exodus_csv(path, verbose=verbose):
+            merged[p.key] = p
+
+    if paths and not merged:
+        print(f"⚠ Read {len(paths)} CSV file(s) but extracted 0 outgoing payments.")
+    return _filter_payments(list(merged.values()), cfg)
+
+
+# --------------------------------------------------------------------------- #
+# Pricing (crypto -> USD at the payment date)
+# --------------------------------------------------------------------------- #
+class Pricer:
+    def __init__(self, cfg: dict, session: requests.Session):
+        self.cfg = cfg["currency"]
+        self.session = session
+        self.base = self.cfg["coingecko_api_base"].rstrip("/")
+        self.coinbase_base = self.cfg.get("coinbase_api_base", "https://api.coinbase.com/v2").rstrip("/")
+        self.stable = {s.upper() for s in self.cfg.get("stablecoins", [])}
+        self.ids = {k.upper(): v for k, v in self.cfg.get("coingecko_ids", {}).items()}
+        self.api_key = os.environ.get("COINGECKO_API_KEY", "").strip()
+        self._cache: dict[tuple[str, str], Optional[float]] = {}
+        self._symbol_list: Optional[dict[str, str]] = None
+        self.warnings: list[str] = []
+
+    def _headers(self) -> dict:
+        if self.api_key:
+            return {"x-cg-demo-api-key": self.api_key}
+        return {}
+
+    def _resolve_id(self, symbol: str) -> Optional[str]:
+        if symbol in self.ids:
+            return self.ids[symbol]
+        if self._symbol_list is None:
+            self._symbol_list = {}
+            try:
+                r = self.session.get(f"{self.base}/coins/list", headers=self._headers(), timeout=30)
+                if r.ok:
+                    for coin in r.json():
+                        sym = str(coin.get("symbol", "")).upper()
+                        self._symbol_list.setdefault(sym, coin.get("id"))
+            except requests.RequestException:
+                pass
+        return self._symbol_list.get(symbol)
+
+    def usd(self, symbol: str, when: date) -> Optional[float]:
+        symbol = (symbol or "").upper()
+        if not symbol:
+            return None
+        if symbol in self.stable:
+            return 1.0
+        ck = (symbol, when.isoformat())
+        if ck in self._cache:
+            return self._cache[ck]
+
+        price = self._coinbase_usd(symbol, when)
+        if price is None:
+            coin_id = self._resolve_id(symbol)
+            if coin_id:
+                url = f"{self.base}/coins/{coin_id}/history"
+                params = {"date": when.strftime("%d-%m-%Y"), "localization": "false"}
+                price = self._get_price(url, params)
+
+        self._cache[ck] = price
+        if price is None:
+            self.warnings.append(f"no price for {symbol} on {when.isoformat()}")
+        return price
+
+    def _coinbase_usd(self, symbol: str, when: date) -> Optional[float]:
+        url = f"{self.coinbase_base}/prices/{symbol}-USD/spot"
+        params = {"date": when.strftime("%Y-%m-%d")}
+        for attempt in range(4):
+            try:
+                r = self.session.get(url, params=params, timeout=30)
+            except requests.RequestException:
+                time.sleep(1 + attempt)
+                continue
+            if r.status_code == 429:
+                time.sleep(2 * (attempt + 1))
+                continue
+            if r.status_code == 404:
+                return None
+            if not r.ok:
+                return None
+            try:
+                return float(r.json()["data"]["amount"])
+            except (KeyError, TypeError, ValueError):
+                return None
+        return None
+
+    def _get_price(self, url: str, params: dict) -> Optional[float]:
+        for attempt in range(5):
+            try:
+                r = self.session.get(url, params=params, headers=self._headers(), timeout=30)
+            except requests.RequestException:
+                time.sleep(2 * (attempt + 1))
+                continue
+            if r.status_code == 429:
+                wait = float(r.headers.get("Retry-After", 8 * (attempt + 1)))
+                time.sleep(min(wait, 30))
+                continue
+            if not r.ok:
+                return None
+            try:
+                data = r.json()
+            except ValueError:
+                return None
+            return (data.get("market_data") or {}).get("current_price", {}).get("usd")
+        return None
+
+
+def price_payments(payments: list[Payment], pricer: Pricer, verbose: bool) -> None:
+    for p in payments:
+        p.usd = pricer.usd(p.currency, p.when)
+        if verbose and p.usd is not None:
+            print(f"  {p.when} {p.amount:.8f} {p.currency} = ${p.usd * p.amount:,.2f}")
+
+
+# --------------------------------------------------------------------------- #
+# Notion REST helpers
+# --------------------------------------------------------------------------- #
+class Notion:
+    def __init__(self, token: str, version: str, session: requests.Session):
+        self.session = session
+        self.headers = {
+            "Authorization": f"Bearer {token}",
+            "Notion-Version": version,
+            "Content-Type": "application/json",
+        }
+
+    def _request(self, method: str, url: str, what: str, **kwargs) -> dict:
+        for attempt in range(5):
+            r = self.session.request(method, url, headers=self.headers, timeout=60, **kwargs)
+            if r.status_code == 429:
+                wait = float(r.headers.get("Retry-After", 2 * (attempt + 1)))
+                time.sleep(min(wait, 30))
+                continue
+            if r.status_code >= 500:
+                time.sleep(2 * (attempt + 1))
+                continue
+            if not r.ok:
+                raise RuntimeError(f"Notion {what} failed ({r.status_code}): {r.text[:400]}")
+            return r.json()
+        raise RuntimeError(f"Notion {what} failed after retries (rate limited or server error)")
+
+    def query_all(self, database_id: str) -> list[dict]:
+        results: list[dict] = []
+        cursor: Optional[str] = None
+        while True:
+            body: dict = {"page_size": 100}
+            if cursor:
+                body["start_cursor"] = cursor
+            data = self._request("POST", f"{NOTION_BASE}/databases/{database_id}/query", "query", json=body)
+            results.extend(data.get("results", []))
+            if data.get("has_more"):
+                cursor = data.get("next_cursor")
+            else:
+                break
+        return results
+
+    def create_page(self, database_id: str, properties: dict) -> dict:
+        return self._request("POST", f"{NOTION_BASE}/pages", "create",
+                             json={"parent": {"database_id": database_id}, "properties": properties})
+
+    def update_properties(self, page_id: str, properties: dict) -> dict:
+        return self._request("PATCH", f"{NOTION_BASE}/pages/{page_id}", "update",
+                             json={"properties": properties})
+
+
+def prop_number(page: dict, name: str) -> Optional[float]:
+    p = page.get("properties", {}).get(name) or {}
+    return p.get("number")
+
+
+def prop_date(page: dict, name: str) -> Optional[date]:
+    p = page.get("properties", {}).get(name) or {}
+    d = p.get("date") or {}
+    start = d.get("start")
+    if not start:
+        return None
+    return _parse_date(start)
+
+
+def prop_title(page: dict, name: str) -> str:
+    p = page.get("properties", {}).get(name) or {}
+    return "".join(t.get("plain_text", "") for t in p.get("title", []))
+
+
+def prop_rich_text(page: dict, name: str) -> str:
+    p = page.get("properties", {}).get(name) or {}
+    return "".join(t.get("plain_text", "") for t in p.get("rich_text", []))
+
+
+def prop_select(page: dict, name: str) -> str:
+    p = page.get("properties", {}).get(name) or {}
+    sel = p.get("select") or {}
+    return sel.get("name", "")
+
+
+# --------------------------------------------------------------------------- #
+# Reconciliation logic
+# --------------------------------------------------------------------------- #
+def extract_tracker_rows(pages: list[dict], props: dict) -> list[TrackerRow]:
+    rows: list[TrackerRow] = []
+    for pg in pages:
+        amount = prop_number(pg, props["amount"])
+        if amount is None:
+            continue
+        rows.append(TrackerRow(
+            when=prop_date(pg, props["date"]),
+            amount_usd=float(amount),
+            title=prop_title(pg, props["title"]),
+            url=pg.get("url", ""),
+        ))
+    return rows
+
+
+def _amount_matches(payment_usd: float, row_usd: float, m: dict) -> bool:
+    diff = abs(payment_usd - row_usd)
+    if diff <= m["amount_abs_tolerance_usd"]:
+        return True
+    if payment_usd > 0 and diff / payment_usd <= m["amount_rel_tolerance"]:
+        return True
+    return False
+
+
+def reconcile(payments: list[Payment], rows: list[TrackerRow], cfg: dict) -> list[Problem]:
+    m = cfg["matching"]
+    min_usd = cfg.get("reconcile", {}).get("min_payment_usd", 0.0)
+    window = timedelta(days=m["date_window_days"])
+    tight = timedelta(days=m["tight_date_window_days"])
+    problems: list[Problem] = []
+    dated_rows = [r for r in rows if r.when is not None]
+
+    for p in payments:
+        if p.usd is None:
+            problems.append(Problem(
+                kind="Untracked Payment", key=p.key,
+                title=f"Unpriced {p.amount:g} {p.currency} payment on {p.when.isoformat()}",
+                amount_usd=0.0, when=p.when,
+                details=(f"Sent {p.amount:g} {p.currency} but could not fetch its USD "
+                         f"value to compare against the tracker. Check it manually."),
+                exodus_amount=p.amount, currency=p.currency, tx_url=p.tx_url,
+            ))
+            continue
+
+        payment_usd = p.usd * p.amount
+        if payment_usd < min_usd:
+            continue
+
+        in_window = [r for r in dated_rows if abs((r.when - p.when).days) <= window.days]
+        if any(_amount_matches(payment_usd, r.amount_usd, m) for r in in_window):
+            continue
+
+        near = [r for r in dated_rows if abs((r.when - p.when).days) <= tight.days]
+        if len(near) == 1:
+            row = near[0]
+            problems.append(Problem(
+                kind="Amount Mismatch", key=p.key,
+                title=f"{p.currency} payment ${payment_usd:,.2f} logged as ${row.amount_usd:,.2f}",
+                amount_usd=payment_usd, when=p.when, tracked_usd=row.amount_usd,
+                details=(f"Sent {p.amount:g} {p.currency} (~${payment_usd:,.2f}) on "
+                         f"{p.when.isoformat()}, but the nearby tracker row "
+                         f"\"{row.title or 'Untitled'}\" is ${row.amount_usd:,.2f} - "
+                         f"off by ${abs(payment_usd - row.amount_usd):,.2f}."),
+                exodus_amount=p.amount, currency=p.currency, tx_url=p.tx_url,
+            ))
+        else:
+            problems.append(Problem(
+                kind="Untracked Payment", key=p.key,
+                title=f"Untracked ${payment_usd:,.2f} {p.currency} payment on {p.when.isoformat()}",
+                amount_usd=payment_usd, when=p.when,
+                details=(f"Sent {p.amount:g} {p.currency} (~${payment_usd:,.2f}) on "
+                         f"{p.when.isoformat()}" + (f' - note: "{p.note}"' if p.note else "")
+                         + ". No matching row found in Total Costs."),
+                exodus_amount=p.amount, currency=p.currency, tx_url=p.tx_url,
+            ))
+    return problems
+
+
+def period_gaps(payments: list[Payment], rows: list[TrackerRow], cfg: dict) -> list[Problem]:
+    pc = cfg.get("period_check", {})
+    if not pc.get("enabled"):
+        return []
+    out_by_month: dict[str, float] = defaultdict(float)
+    for p in payments:
+        if p.usd is None:
+            continue
+        out_by_month[p.when.strftime("%Y-%m")] += p.usd * p.amount
+    tracked_by_month: dict[str, float] = defaultdict(float)
+    for r in rows:
+        if r.when is None:
+            continue
+        tracked_by_month[r.when.strftime("%Y-%m")] += r.amount_usd
+
+    problems: list[Problem] = []
+    for month, out_usd in sorted(out_by_month.items()):
+        tracked = tracked_by_month.get(month, 0.0)
+        gap = out_usd - tracked
+        if gap <= 0 or gap < pc["gap_abs_threshold_usd"]:
+            continue
+        if out_usd > 0 and gap / out_usd < pc["gap_rel_threshold"]:
+            continue
+        problems.append(Problem(
+            kind="Period Gap", key=f"PERIOD-{month}",
+            title=f"{month}: ${gap:,.2f} more left the wallet than is tracked",
+            amount_usd=out_usd, when=_month_last_day(month), tracked_usd=tracked,
+            details=(f"In {month}, ${out_usd:,.2f} of payments left the wallet but only "
+                     f"${tracked:,.2f} is logged in Total Costs - a ${gap:,.2f} gap."),
+        ))
+    return problems
+
+
+def _month_last_day(month: str) -> date:
+    y, mo = (int(x) for x in month.split("-"))
+    if mo == 12:
+        return date(y, 12, 31)
+    return date(y, mo + 1, 1) - timedelta(days=1)
+
+
+# --------------------------------------------------------------------------- #
+# Alert writing (de-dup + auto-resolve + value backfill)
+# --------------------------------------------------------------------------- #
+def _txt(value: str) -> dict:
+    return {"rich_text": [{"text": {"content": value[:2000]}}]} if value else {"rich_text": []}
+
+
+def build_alert_properties(prob: Problem, include_status: bool = True) -> dict:
+    props: dict = {
+        "Alert": {"title": [{"text": {"content": prob.title[:2000]}}]},
+        "Type": {"select": {"name": prob.kind}},
+        "Tx ID": _txt(prob.key),
+        "Details": _txt(prob.details),
+        "Currency": _txt(prob.currency),
+    }
+    if include_status:
+        props["Status"] = {"select": {"name": "Open"}}
+    if prob.amount_usd is not None:
+        props["Amount (USD)"] = {"number": round(prob.amount_usd, 2)}
+    if prob.tracked_usd is not None:
+        props["Tracked (USD)"] = {"number": round(prob.tracked_usd, 2)}
+    if prob.exodus_amount is not None:
+        props["Exodus Amount"] = {"number": prob.exodus_amount}
+    if prob.when is not None:
+        props["Date"] = {"date": {"start": prob.when.isoformat()}}
+    if prob.tx_url:
+        props["Tx Link"] = {"url": prob.tx_url}
+    return props
+
+
+def write_alerts(notion: Notion, alerts_db: str, problems: list[Problem],
+                 resolvable_keys: set[str], dry_run: bool, verbose: bool) -> dict:
+    existing_pages = notion.query_all(alerts_db)
+    existing: dict[tuple[str, str], dict] = {}
+    for pg in existing_pages:
+        key = prop_rich_text(pg, "Tx ID")
+        kind = prop_select(pg, "Type")
+        if key:
+            existing[(key, kind)] = pg
+
+    problem_keys = {(p.key, p.kind) for p in problems}
+    created = skipped = resolved = updated = 0
+
+    new_count = sum(1 for prob in problems if (prob.key, prob.kind) not in existing)
+    if new_count > 500 and not dry_run:
+        print(f"  ⚠ {new_count} new alerts to write; this can take several minutes. "
+              "Set reconcile.start_date in config.json to shrink a first-run backlog.")
+
+    for prob in problems:
+        ident = (prob.key, prob.kind)
+        if ident in existing:
+            pg = existing[ident]
+            status = prop_select(pg, "Status")
+            old_amount = prop_number(pg, "Amount (USD)")
+            new_amount = round(prob.amount_usd, 2) if prob.amount_usd is not None else None
+            changed = (new_amount is not None
+                       and (old_amount is None or abs((old_amount or 0.0) - new_amount) >= 1.0))
+            if changed and status != "Ignored":
+                if dry_run:
+                    print(f"  $ WOULD UPDATE -> ${new_amount:,.2f}: {prob.title}")
+                else:
+                    notion.update_properties(pg["id"], build_alert_properties(prob, include_status=False))
+                    print(f"  $ updated -> ${new_amount:,.2f}: {prob.title}")
+                updated += 1
+            else:
+                skipped += 1
+                if verbose:
+                    print(f"  = already alerted ({status}): {prob.title}")
+            continue
+        if dry_run:
+            print(f"  + WOULD CREATE [{prob.kind}] {prob.title}")
+            created += 1
+            continue
+        notion.create_page(alerts_db, build_alert_properties(prob))
+        created += 1
+        print(f"  + alert: [{prob.kind}] {prob.title}")
+
+    for (key, kind), pg in existing.items():
+        if kind == "Period Gap":
+            continue
+        if prop_select(pg, "Status") != "Open":
+            continue
+        if (key, kind) in problem_keys:
+            continue
+        if key not in resolvable_keys:
+            continue
+        if dry_run:
+            print(f"  ~ WOULD RESOLVE: {prop_title(pg, 'Alert')}")
+            resolved += 1
+            continue
+        notion.update_properties(pg["id"], {"Status": {"select": {"name": "Resolved"}}})
+        resolved += 1
+        print(f"  ~ resolved: {prop_title(pg, 'Alert')}")
+
+    return {"created": created, "skipped": skipped, "resolved": resolved, "updated": updated}
+
+
+# --------------------------------------------------------------------------- #
+# Main
+# --------------------------------------------------------------------------- #
+def main() -> int:
+    ap = argparse.ArgumentParser(description="Reconcile wallet payments against the Notion Total Costs tracker.")
+    ap.add_argument("--config", default=DEFAULT_CONFIG, help="Path to config.json")
+    ap.add_argument("--csv", help="Force a specific CSV file (implies the csv source)")
+    ap.add_argument("--dry-run", action="store_true", help="Report only; write nothing to Notion")
+    ap.add_argument("--verbose", action="store_true", help="Verbose output")
+    args = ap.parse_args()
+
+    cfg = load_config(args.config)
+    validate_config(cfg)
+    session = requests.Session()
+
+    source = "csv" if args.csv else cfg.get("source", "csv").lower()
+    print("Exodus -> Notion cost reconciler")
+    print("=" * 40)
+    print(f"Source: {source}" + (f"  (address {cfg['ethereum']['address']})" if source == "ethereum" else ""))
+
+    if source == "ethereum":
+        payments = collect_eth_payments(cfg, session, args.verbose)
+    else:
+        payments = collect_csv_payments(cfg, args.csv, args.verbose)
+
+    if not payments:
+        print("No outgoing payments to check (nothing new, or filtered out by start_date).")
+        return 0
+    print(f"Outgoing payments found: {len(payments)}")
+
+    pricer = Pricer(cfg, session)
+    price_payments(payments, pricer, args.verbose)
+    priced = sum(1 for p in payments if p.usd is not None)
+    total_out = sum(p.usd * p.amount for p in payments if p.usd is not None)
+    print(f"Priced {priced}/{len(payments)} payments  (~${total_out:,.2f} total outflow)")
+    for w in pricer.warnings:
+        print(f"  ! {w}")
+
+    token = require_token()
+    notion = Notion(token, cfg["notion"]["api_version"], session)
+    try:
+        cost_pages = notion.query_all(cfg["notion"]["total_costs_database_id"])
+    except RuntimeError as exc:
+        sys.exit(f"{exc}\n\nMost likely the Notion integration is not connected to the "
+                 "Total Costs database. In Notion -> open it -> '...' -> Connections -> add it.")
+    tracker_rows = extract_tracker_rows(cost_pages, cfg["total_costs_properties"])
+    print(f"Total Costs rows loaded: {len(tracker_rows)}")
+
+    problems = reconcile(payments, tracker_rows, cfg)
+    problems += period_gaps(payments, tracker_rows, cfg)
+
+    by_kind: dict[str, int] = defaultdict(int)
+    for p in problems:
+        by_kind[p.kind] += 1
+    if problems:
+        print(f"Discrepancies: {len(problems)}  ("
+              + ", ".join(f"{k}={v}" for k, v in sorted(by_kind.items())) + ")")
+    else:
+        print("Discrepancies: 0 - everything reconciles ✔")
+
+    resolvable_keys = {p.key for p in payments}
+    try:
+        stats = write_alerts(notion, cfg["notion"]["alerts_database_id"], problems,
+                             resolvable_keys, args.dry_run, args.verbose)
+    except RuntimeError as exc:
+        sys.exit(f"{exc}\n\nMost likely the Notion integration is not connected to the "
+                 "Payment Reconciliation Alerts database. In Notion -> open it -> '...' "
+                 "-> Connections -> add it.")
+    print("-" * 40)
+    print(f"Alerts created: {stats['created']}  updated: {stats['updated']}  "
+          f"already-known: {stats['skipped']}  auto-resolved: {stats['resolved']}"
+          + ("   (dry run - nothing written)" if args.dry_run else ""))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

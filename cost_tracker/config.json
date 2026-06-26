@@ -1,0 +1,70 @@
+{
+  "_comment": "Config for the Exodus -> Notion cost reconciler. Secrets (Notion token, optional Etherscan/CoinGecko keys) come from environment variables / GitHub secrets, never this file. Safe to edit and commit.",
+
+  "source": "ethereum",
+  "_comment_source": "'ethereum' = fully automated on-chain watcher (no CSV). 'csv' = read Exodus exports from data/exodus/.",
+
+  "ethereum": {
+    "address": "0x78Ad4dC757730dDa08b48c426B5DB1CB70e7907A",
+    "usdt_contract": "0xdAC17F958D2ee523a2206206994597C13D831ec7",
+    "usdt_decimals": 6,
+    "symbol": "USDT",
+    "etherscan_api_base": "https://api.etherscan.io/v2/api",
+    "blockscout_api_base": "https://eth.blockscout.com/api",
+    "_comment": "Watches outgoing USDT (ERC-20) transfers FROM 'address'. Keyless via Blockscout by default; set the ETHERSCAN_API_KEY GitHub secret to use Etherscan instead (more reliable, free key)."
+  },
+
+  "notion": {
+    "total_costs_database_id": "339830f5-19b4-80d5-8174-e86ac4fc433d",
+    "alerts_database_id": "f2729dcf-b6e8-4ab6-863c-312892199501",
+    "api_version": "2022-06-28"
+  },
+
+  "total_costs_properties": {
+    "amount": "Amount",
+    "date": "Date",
+    "title": "Description"
+  },
+
+  "csv": {
+    "input_dir": "data/exodus",
+    "_comment": "Only used when source is 'csv'."
+  },
+
+  "reconcile": {
+    "start_date": "2026-06-26",
+    "_comment_start_date": "Only check payments on/after this date (YYYY-MM-DD). Set to the day you switched to the on-chain watcher so old history isn't re-flagged. Set null to check everything.",
+    "ignore_currencies": [],
+    "min_payment_usd": 5.0,
+    "_comment_min": "Payments worth less than this in USD are ignored (dust)."
+  },
+
+  "matching": {
+    "date_window_days": 4,
+    "tight_date_window_days": 1,
+    "amount_rel_tolerance": 0.12,
+    "amount_abs_tolerance_usd": 15.0,
+    "_comment": "A payment counts as 'tracked' if a Total Costs row exists within date_window_days whose USD amount is within EITHER amount_rel_tolerance OR amount_abs_tolerance_usd. If no amount match but exactly ONE cost row sits within tight_date_window_days, it is flagged as an Amount Mismatch instead of Untracked."
+  },
+
+  "period_check": {
+    "enabled": true,
+    "granularity": "month",
+    "gap_rel_threshold": 0.15,
+    "gap_abs_threshold_usd": 100.0,
+    "_comment": "Per month, if total USD that left exceeds total logged by more than BOTH thresholds, raise a Period Gap alert."
+  },
+
+  "currency": {
+    "coingecko_api_base": "https://api.coingecko.com/api/v3",
+    "coinbase_api_base": "https://api.coinbase.com/v2",
+    "stablecoins": ["USDT", "USDC", "DAI", "BUSD", "USD", "TUSD", "USDP", "GUSD", "USDD", "FDUSD", "PYUSD"],
+    "coingecko_ids": {
+      "BTC": "bitcoin", "ETH": "ethereum", "USDT": "tether", "USDC": "usd-coin",
+      "SOL": "solana", "LTC": "litecoin", "XRP": "ripple", "DOGE": "dogecoin",
+      "ADA": "cardano", "TRX": "tron", "BNB": "binancecoin", "MATIC": "matic-network",
+      "AVAX": "avalanche-2", "DOT": "polkadot", "LINK": "chainlink", "BCH": "bitcoin-cash",
+      "XLM": "stellar", "ATOM": "cosmos", "DAI": "dai", "SHIB": "shiba-inu"
+    }
+  }
+}
