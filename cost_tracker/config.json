@@ -23,7 +23,8 @@
   "total_costs_properties": {
     "amount": "Amount",
     "date": "Date",
-    "title": "Description"
+    "title": "Description",
+    "notes": "Notes"
   },
 
   "csv": {
@@ -40,11 +41,13 @@
   },
 
   "matching": {
+    "mode": "txref",
+    "_comment_mode": "'txref' = a payment is tracked ONLY if its transaction reference (shown in each alert) appears in a Total Costs row's Notes. Reliable even when many costs share the same amount. 'fuzzy' = match by amount+date (unreliable with clustered amounts).",
     "date_window_days": 4,
     "tight_date_window_days": 1,
     "amount_rel_tolerance": 0.12,
     "amount_abs_tolerance_usd": 15.0,
-    "_comment": "A payment counts as 'tracked' if a Total Costs row exists within date_window_days whose USD amount is within EITHER amount_rel_tolerance OR amount_abs_tolerance_usd. If no amount match but exactly ONE cost row sits within tight_date_window_days, it is flagged as an Amount Mismatch instead of Untracked."
+    "_comment": "In 'fuzzy' mode: a payment is 'tracked' if a Total Costs row within date_window_days is within EITHER amount_rel_tolerance OR amount_abs_tolerance_usd. In 'txref' mode these tolerances are only used to flag an Amount Mismatch on an already-linked payment."
   },
 
   "period_check": {

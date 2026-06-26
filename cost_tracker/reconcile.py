@@ -91,6 +91,7 @@ class TrackerRow:
     amount_usd: float
     title: str
     url: str
+    text: str = ""          # lowercased Description + Notes, for tx-reference matching
 
 
 @dataclass
@@ -650,16 +651,20 @@ def prop_select(page: dict, name: str) -> str:
 # Reconciliation logic
 # --------------------------------------------------------------------------- #
 def extract_tracker_rows(pages: list[dict], props: dict) -> list[TrackerRow]:
+    notes_name = props.get("notes", "Notes")
     rows: list[TrackerRow] = []
     for pg in pages:
         amount = prop_number(pg, props["amount"])
         if amount is None:
             continue
+        title = prop_title(pg, props["title"])
+        notes = prop_rich_text(pg, notes_name)
         rows.append(TrackerRow(
             when=prop_date(pg, props["date"]),
             amount_usd=float(amount),
-            title=prop_title(pg, props["title"]),
+            title=title,
             url=pg.get("url", ""),
+            text=f"{title} {notes}".lower(),
         ))
     return rows
 
@@ -724,6 +729,72 @@ def reconcile(payments: list[Payment], rows: list[TrackerRow], cfg: dict) -> lis
                          + ". No matching row found in Total Costs."),
                 exodus_amount=p.amount, currency=p.currency, tx_url=p.tx_url,
             ))
+    return problems
+
+
+def _payment_ref(txid: str) -> str:
+    """A short, paste-able, collision-safe reference from the tx hash: the last
+    10 hex characters (e.g. 'a1b2c3d4e5'). ~1 trillion combinations."""
+    h = (txid or "").lower()
+    if h.startswith("0x"):
+        h = h[2:]
+    return h[-10:] if len(h) >= 10 else h
+
+
+def reconcile_txref(payments: list[Payment], rows: list[TrackerRow], cfg: dict) -> list[Problem]:
+    """Tx-reference matching: a payment is 'tracked' ONLY if its transaction
+    reference appears in a Total Costs row's text (Description/Notes). Reliable
+    even when many costs share the same dollar amount. If linked but the logged
+    amount is far off, it's flagged as an Amount Mismatch instead."""
+    m = cfg["matching"]
+    min_usd = cfg.get("reconcile", {}).get("min_payment_usd", 0.0)
+    problems: list[Problem] = []
+
+    for p in payments:
+        if p.usd is None:
+            problems.append(Problem(
+                kind="Untracked Payment", key=p.key,
+                title=f"Unpriced {p.amount:g} {p.currency} payment on {p.when.isoformat()}",
+                amount_usd=0.0, when=p.when,
+                details="Sent but could not value it. Check manually.",
+                exodus_amount=p.amount, currency=p.currency, tx_url=p.tx_url,
+            ))
+            continue
+
+        payment_usd = p.usd * p.amount
+        if payment_usd < min_usd:
+            continue
+
+        ref = _payment_ref(p.txid)
+        full = (p.txid or "").lower()
+        linked = [r for r in rows if (ref and ref in r.text) or (full and full in r.text)]
+
+        if not linked:
+            problems.append(Problem(
+                kind="Untracked Payment", key=p.key,
+                title=f"Untracked ${payment_usd:,.2f} {p.currency} payment on {p.when.isoformat()}",
+                amount_usd=payment_usd, when=p.when,
+                details=(f"Sent {p.amount:g} {p.currency} (~${payment_usd:,.2f}) on "
+                         f"{p.when.isoformat()}" + (f" ({p.note})" if p.note else "")
+                         + f". Not linked to any Total Costs row. When you log this cost, paste the "
+                         f"reference  {ref}  into its Notes — this alert then clears automatically."),
+                exodus_amount=p.amount, currency=p.currency, tx_url=p.tx_url,
+            ))
+            continue
+
+        # Linked - sanity-check the logged amount.
+        if any(_amount_matches(payment_usd, r.amount_usd, m) for r in linked):
+            continue  # tracked, amount fine
+        row = min(linked, key=lambda r: abs(r.amount_usd - payment_usd))
+        problems.append(Problem(
+            kind="Amount Mismatch", key=p.key,
+            title=f"{p.currency} payment ${payment_usd:,.2f} logged as ${row.amount_usd:,.2f}",
+            amount_usd=payment_usd, when=p.when, tracked_usd=row.amount_usd,
+            details=(f"Linked to \"{row.title or 'Untitled'}\" (reference {ref}), but that row is "
+                     f"${row.amount_usd:,.2f} vs the ${payment_usd:,.2f} that left the wallet - "
+                     f"off by ${abs(payment_usd - row.amount_usd):,.2f}."),
+            exodus_amount=p.amount, currency=p.currency, tx_url=p.tx_url,
+        ))
     return problems
 
 
@@ -912,7 +983,10 @@ def main() -> int:
     tracker_rows = extract_tracker_rows(cost_pages, cfg["total_costs_properties"])
     print(f"Total Costs rows loaded: {len(tracker_rows)}")
 
-    problems = reconcile(payments, tracker_rows, cfg)
+    if cfg["matching"].get("mode", "fuzzy").lower() == "txref":
+        problems = reconcile_txref(payments, tracker_rows, cfg)
+    else:
+        problems = reconcile(payments, tracker_rows, cfg)
     problems += period_gaps(payments, tracker_rows, cfg)
 
     by_kind: dict[str, int] = defaultdict(int)
