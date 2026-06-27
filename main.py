@@ -367,6 +367,14 @@ def list_recent_requests(limit: int = 15) -> list[sqlite3.Row]:
             "SELECT * FROM requests ORDER BY id DESC LIMIT ?", (limit,)).fetchall())
 
 
+def list_requests_unsynced() -> list[sqlite3.Row]:
+    """Requests that never made it into Notion (page id missing) — for /resync backfill."""
+    with _conn() as c:
+        return list(c.execute(
+            "SELECT * FROM requests WHERE notion_page_id IS NULL OR notion_page_id = '' "
+            "ORDER BY id ASC").fetchall())
+
+
 # =========================================================================== #
 # Inline keyboards
 # =========================================================================== #
@@ -953,7 +961,7 @@ async def nr_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await q.edit_message_text(
             f"⚠️ Request #{req_id} saved, but I couldn't message {data['model_name']} — she may not "
             "have started the bot yet. Ask her to open her invite link.")
-    await _notion_sync(req)
+    await _notion_sync(req, context.bot)
     await _notify(context, req, "🆕 New request raised", exclude=(update.effective_user.id,))
     return ConversationHandler.END
 
@@ -1021,7 +1029,7 @@ async def ma_eta_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await send(update, context,
                f"✅ Accepted. ETA: {eta_str}. I'll remind you and let the team know.",
                reply_markup=menu_for(Role.MODEL.value))
-    await _notion_sync(req)
+    await _notion_sync(req, context.bot)
     await _notify(context, req, "✅ Request accepted")
     return ConversationHandler.END
 
@@ -1076,7 +1084,7 @@ async def _finish_decline(update, context, reason):
         except TelegramError as exc:
             log.debug("Could not clear decline prompt for request %s: %s", req_id, exc)
     context.user_data.pop("ma", None)
-    await _notion_sync(req)
+    await _notion_sync(req, context.bot)
     await _notify(context, req, "❌ Request declined")
     return ConversationHandler.END
 
@@ -1194,7 +1202,7 @@ async def ma_upload_done(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except TelegramError as exc:
             log.debug("Could not update upload prompt for request %s: %s", req_id, exc)
     context.user_data.pop("ma", None)
-    await _notion_sync(req)
+    await _notion_sync(req, context.bot)
     await _notify(context, req, f"📦 Request delivered ({count} file(s))")
     await send(update, context, "Delivered ✅ — sent to the team.",
                reply_markup=menu_for(Role.MODEL.value))
@@ -1472,10 +1480,33 @@ def _notion_props(req: sqlite3.Row) -> dict:
     return props
 
 
-async def _notion_sync(req: sqlite3.Row) -> None:
-    """Create or update the Notion row for a request. Never breaks the bot."""
-    if not notion_enabled():
+_LAST_NOTION_ALERT = 0.0  # epoch secs of the last owner alert, to throttle to once/hour
+
+
+async def _alert_owners_notion_failure(bot, req_id: int, exc: Exception) -> None:
+    """DM owners when Notion sync breaks, so it never silently falls behind again."""
+    global _LAST_NOTION_ALERT
+    now = datetime.now(timezone.utc).timestamp()
+    if now - _LAST_NOTION_ALERT < 3600:   # at most one alert per hour
         return
+    _LAST_NOTION_ALERT = now
+    msg = (f"⚠️ Notion sync is FAILING (request #{req_id}: {exc}).\n\n"
+           "Requests are still saved in the bot and sent to the model, but they're NOT "
+           "showing up in the Notion tracker. Fix: re-add the bot's integration to the "
+           "'REPEL Content Requests' database (••• → Connections), then run /resync to "
+           "backfill everything that's missing.")
+    for owner_user in list_by_role(Role.OWNER.value):
+        await _safe_dm(bot, owner_user["telegram_id"], msg)
+
+
+async def _notion_sync(req: sqlite3.Row, bot=None) -> bool:
+    """Create or update the Notion row for a request. Never breaks the bot.
+
+    Returns True on a successful sync. On failure it logs, alerts the owner (throttled)
+    if a bot is given, and returns False — so a broken Notion link can't go unnoticed.
+    """
+    if not notion_enabled():
+        return False
     try:
         page_id = req["notion_page_id"] if "notion_page_id" in req.keys() else None
         if page_id:
@@ -1483,12 +1514,47 @@ async def _notion_sync(req: sqlite3.Row) -> None:
         else:
             db_id = await ensure_notion_db()
             if not db_id:
-                return
+                return False
             data = await _notion_post(
                 "/pages", {"parent": {"database_id": db_id}, "properties": _notion_props(req)})
             update_request(req["id"], notion_page_id=data["id"])
-    except Exception as exc:  # noqa: BLE001 — logging only; must not crash handlers
+        return True
+    except Exception as exc:  # noqa: BLE001 — must not crash handlers
         log.warning("Notion sync failed for request %s: %s", req["id"], exc)
+        if bot is not None:
+            try:
+                await _alert_owners_notion_failure(bot, req["id"], exc)
+            except Exception:  # noqa: BLE001 — alerting must never crash either
+                pass
+        return False
+
+
+async def _resync_to_notion() -> tuple[int, int, Optional[str]]:
+    """Push every request missing from Notion (backfill). Returns (synced, failed, first_error)."""
+    if not notion_enabled():
+        return (0, 0, "Notion isn't configured (set NOTION_TOKEN and NOTION_PARENT_PAGE_ID).")
+    pending = list_requests_unsynced()
+    if not pending:
+        return (0, 0, None)
+    try:
+        db_id = await ensure_notion_db()
+    except Exception as exc:  # noqa: BLE001
+        return (0, len(pending), f"Couldn't reach the Notion database: {exc}")
+    if not db_id:
+        return (0, len(pending), "No Notion database is configured.")
+    ok = failed = 0
+    first_error = None
+    for req in pending:
+        try:
+            data = await _notion_post(
+                "/pages", {"parent": {"database_id": db_id}, "properties": _notion_props(req)})
+            update_request(req["id"], notion_page_id=data["id"])
+            ok += 1
+        except Exception as exc:  # noqa: BLE001
+            failed += 1
+            first_error = first_error or str(exc)
+            log.warning("Resync failed for request %s: %s", req["id"], exc)
+    return (ok, failed, first_error)
 
 
 # =========================================================================== #
@@ -1567,6 +1633,25 @@ async def remindnow_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await send(update, context, f"🔔 Reminder check complete — {count} reminder(s) sent.")
 
 
+async def resync_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Owner-only: backfill every request that's missing from the Notion tracker."""
+    if role_of(update.effective_user.id) != Role.OWNER.value:
+        await send(update, context, "That command is for the agency owner only.")
+        return
+    await send(update, context, "🔄 Re-syncing requests to Notion…")
+    ok, failed, err = await _resync_to_notion()
+    if ok == 0 and failed == 0:
+        await send(update, context, "✅ Nothing to backfill — every request is already in Notion.")
+        return
+    msg = f"✅ Synced {ok} request(s) to the Notion tracker."
+    if failed:
+        msg += (f"\n⚠️ {failed} still failing — {err}\n\n"
+                "That usually means the bot's integration can't write to the database. "
+                "Open 'REPEL Content Requests' in Notion → ••• → Connections → add the bot "
+                "integration, then run /resync again.")
+    await send(update, context, msg)
+
+
 # =========================================================================== #
 # Application assembly
 # =========================================================================== #
@@ -1581,6 +1666,7 @@ async def _post_init(app: Application) -> None:
         BotCommand("invite", "Owner: create an invite link"),
         BotCommand("people", "Owner: list everyone"),
         BotCommand("feed", "Owner: recent requests"),
+        BotCommand("resync", "Owner: backfill requests into Notion"),
         BotCommand("help", "Show help"),
         BotCommand("cancel", "Stop the current step"),
     ])
@@ -1627,6 +1713,7 @@ def build_application(config: Config) -> Application:
     app.add_handler(CommandHandler("myrequests", my_requests_cmd))
     app.add_handler(CommandHandler("queue", queue_cmd))
     app.add_handler(CommandHandler("remindnow", remindnow_cmd))
+    app.add_handler(CommandHandler("resync", resync_cmd))
     app.add_handler(CallbackQueryHandler(menu_cb, pattern=r"^menu:(myrequests|queue)$"))
 
     # Stray-text fallback last, same group, so an active conversation always wins.
