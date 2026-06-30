@@ -1,0 +1,248 @@
+// SWIFT — VA Recruitment, Trial, Scoring & Onboarding System
+// Phase 1 (MVP) data model.
+//
+// DB: SQLite for zero-config local/dev. The schema is intentionally
+// Postgres-compatible: to move to Postgres/Supabase, change `provider` to
+// "postgresql", point DATABASE_URL at the Postgres URL, and (optionally)
+// promote the String JSON columns to `Json`/jsonb. SQLite has no native
+// enums, so status/stage/tier values are Strings validated in app code
+// (see src/lib/constants.ts).
+
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Creators / models
+// ─────────────────────────────────────────────────────────────────────────────
+model Creator {
+  id              String   @id @default(cuid())
+  name            String
+  niche           String?
+  personaNotes    String?
+  xMainUrl        String?
+  igHandle        String?
+  tiktokHandle    String?
+  contentDriveUrl String?
+  active          Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  rolesAsDefault Role[]  @relation("RoleDefaultCreator")
+  trials         Trial[]
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Roles (the six VA roles). One Rubric per role; templates resolved by category.
+// ─────────────────────────────────────────────────────────────────────────────
+model Role {
+  id               String   @id @default(cuid())
+  key              String   @unique // x_va | tiktok_va | ig_manager | ig_dm_handler | video_editor | reddit_va
+  displayName      String
+  trialHours       Int      @default(24)
+  trainingGroupUrl String?
+  defaultCreatorId String?
+  managerUserId    String?
+  active           Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  defaultCreator Creator?          @relation("RoleDefaultCreator", fields: [defaultCreatorId], references: [id])
+  manager        User?             @relation("RoleManager", fields: [managerUserId], references: [id])
+  rubric         Rubric?
+  templates      MessageTemplate[]
+  applications   Application[]
+  candidates     Candidate[]       @relation("CandidateCurrentRole")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Candidates → become Users on hire
+// ─────────────────────────────────────────────────────────────────────────────
+model Candidate {
+  id             String   @id @default(cuid())
+  fullName       String
+  telegramHandle String?
+  telegramChatId String? // numeric chat id once the candidate DMs the bot
+  email          String?
+  source         String   @default("onlinejobs_ph")
+  timezone       String?
+  country        String?
+  whyText        String? // their "why this role"
+  notes          String?
+  currentStage   String   @default("APPLIED")
+  currentRoleId  String?
+  archived       Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  currentRole  Role?         @relation("CandidateCurrentRole", fields: [currentRoleId], references: [id])
+  applications Application[]
+  messages     Message[]
+  hiredUser    User?         @relation("CandidateToUser")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Application — one per (candidate, role) attempt; drives the state machine
+// ─────────────────────────────────────────────────────────────────────────────
+model Application {
+  id             String   @id @default(cuid())
+  candidateId    String
+  roleId         String
+  whyText        String?
+  stage          String   @default("APPLIED")
+  appliedAt      DateTime @default(now())
+  stageChangedAt DateTime @default(now())
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  candidate Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  role      Role      @relation(fields: [roleId], references: [id])
+  trials    Trial[]
+  messages  Message[]
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Trial — the 24h task the candidate runs
+// ─────────────────────────────────────────────────────────────────────────────
+model Trial {
+  id              String    @id @default(cuid())
+  applicationId   String
+  creatorId       String?
+  contentDriveUrl String?
+  accountUsed     String?
+  briefSentAt     DateTime?
+  startedAt       DateTime?
+  deadlineAt      DateTime?
+  submissionUrls  String    @default("[]") // JSON array of links
+  submittedAt     DateTime?
+  status          String    @default("not_started") // not_started | active | submitted | expired
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  creator     Creator?    @relation(fields: [creatorId], references: [id])
+  scoreCard   ScoreCard?
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Rubric — one per role; criteria is a JSON array of weighted, anchored items
+// ─────────────────────────────────────────────────────────────────────────────
+model Rubric {
+  id        String   @id @default(cuid())
+  roleId    String   @unique
+  name      String
+  criteria  String // JSON: [{key,label,weight,anchor_5,anchor_3,anchor_1}]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ScoreCard — the finalized (or draft) score for a trial
+// ─────────────────────────────────────────────────────────────────────────────
+model ScoreCard {
+  id            String    @id @default(cuid())
+  trialId       String    @unique
+  scorerUserId  String?
+  aiDraft       String? // JSON {scores, rationale, flags, suggested_tier}
+  scores        String    @default("{}") // JSON {criterion_key: 0-5}
+  flags         String    @default("[]") // JSON array of hard-fail flag keys
+  weightedTotal Float     @default(0)
+  tier          String? // A | B | C | REJECT
+  rationale     String?
+  finalized     Boolean   @default(false)
+  scoredAt      DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  trial  Trial @relation(fields: [trialId], references: [id], onDelete: Cascade)
+  scorer User? @relation(fields: [scorerUserId], references: [id])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Message templates (Telegram). Resolved by (roleId, category).
+// ─────────────────────────────────────────────────────────────────────────────
+model MessageTemplate {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  roleId    String?
+  channel   String   @default("telegram")
+  category  String   @default("other") // first_touch | brief | offer | retrial | decline | training | other
+  subject   String?
+  body      String
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  role Role? @relation(fields: [roleId], references: [id])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Users (staff). A Candidate becomes a User on hire.
+// ─────────────────────────────────────────────────────────────────────────────
+model User {
+  id             String   @id @default(cuid())
+  name           String
+  role           String   @default("va") // admin | manager | va
+  telegramHandle String?
+  email          String?
+  payRate        String?
+  paymentMethod  String?
+  status         String   @default("active")
+  candidateId    String?  @unique
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  fromCandidate Candidate?  @relation("CandidateToUser", fields: [candidateId], references: [id])
+  managedRoles  Role[]      @relation("RoleManager")
+  scoreCards    ScoreCard[]
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Message log (candidate comms history)
+// ─────────────────────────────────────────────────────────────────────────────
+model Message {
+  id            String   @id @default(cuid())
+  candidateId   String
+  applicationId String?
+  direction     String   @default("outbound") // outbound | inbound
+  channel       String   @default("telegram")
+  templateKey   String?
+  body          String
+  status        String   @default("sent") // sent | simulated | failed | received
+  meta          String?
+  createdAt     DateTime @default(now())
+
+  candidate   Candidate    @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  application Application?  @relation(fields: [applicationId], references: [id])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Lightweight ops tables
+// ─────────────────────────────────────────────────────────────────────────────
+model Notification {
+  id        String    @id @default(cuid())
+  type      String
+  payload   String?
+  channel   String    @default("ops")
+  status    String    @default("pending")
+  createdAt DateTime  @default(now())
+  sentAt    DateTime?
+}
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  actorUserId String?
+  action      String
+  entity      String
+  entityId    String
+  meta        String?
+  createdAt   DateTime @default(now())
+}
