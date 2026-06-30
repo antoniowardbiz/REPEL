@@ -116,6 +116,40 @@ async function main() {
     `  roles: ${rolesByKey.size}, creators: ${creatorsByName.size}, templates: ${TEMPLATES.length}`
   );
 
+  // Telegram "folders": a Trial group per role + a Qualified group per role×model.
+  const creatorEntries = [...creatorsByName.entries()];
+  let groupCount = 0;
+  for (const r of ROLES) {
+    const roleId = rolesByKey.get(r.key)!;
+    await prisma.telegramGroup.upsert({
+      where: { key: `grp_trial_${r.key}` },
+      update: { label: `${r.displayName} – Trial`, roleId, kind: "trial" },
+      create: {
+        key: `grp_trial_${r.key}`,
+        label: `${r.displayName} – Trial`,
+        roleId,
+        kind: "trial",
+        inviteUrl: r.trainingGroupUrl || null,
+      },
+    });
+    groupCount++;
+    for (const [cname, cid] of creatorEntries) {
+      await prisma.telegramGroup.upsert({
+        where: { key: `grp_qual_${r.key}_${cname.toLowerCase()}` },
+        update: { label: `${r.displayName} – ${cname}`, roleId, creatorId: cid, kind: "qualified" },
+        create: {
+          key: `grp_qual_${r.key}_${cname.toLowerCase()}`,
+          label: `${r.displayName} – ${cname}`,
+          roleId,
+          creatorId: cid,
+          kind: "qualified",
+        },
+      });
+      groupCount++;
+    }
+  }
+  console.log(`  telegram groups: ${groupCount}`);
+
   // 5) Demo candidates (only if the pipeline is empty) so the board isn't blank.
   const existingCandidates = await prisma.candidate.count();
   if (existingCandidates > 0) {
@@ -329,6 +363,24 @@ async function main() {
   }
 
   console.log("  demo candidates created.");
+
+  // Demo hired VAs to populate the distribution view (3 on Lola, 2 on Lae).
+  const lolaId = creatorsByName.get("Lola")!;
+  const laeId = creatorsByName.get("Lae")!;
+  const xRoleId = rolesByKey.get("x_va")!;
+  const ttRoleId = rolesByKey.get("tiktok_va")!;
+  const demoVas: [string, string, string][] = [
+    ["Rin Tolentino", xRoleId, lolaId],
+    ["Mara Diaz", xRoleId, lolaId],
+    ["Kit Aquino", xRoleId, lolaId],
+    ["Bea Navarro", ttRoleId, laeId],
+    ["Tim Soriano", ttRoleId, laeId],
+  ];
+  for (const [name, roleId, creatorId] of demoVas) {
+    const u = await prisma.user.create({ data: { name, role: "va", status: "active" } });
+    await prisma.assignment.create({ data: { userId: u.id, roleId, creatorId, status: "active" } });
+  }
+  console.log(`  demo assignments: ${demoVas.length} (Lola 3 / Lae 2)`);
   console.log("Done.");
 }
 

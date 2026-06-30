@@ -34,8 +34,10 @@ model Creator {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
-  rolesAsDefault Role[]  @relation("RoleDefaultCreator")
+  rolesAsDefault Role[]           @relation("RoleDefaultCreator")
   trials         Trial[]
+  assignments    Assignment[]
+  telegramGroups TelegramGroup[]
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -59,6 +61,8 @@ model Role {
   templates      MessageTemplate[]
   applications   Application[]
   candidates     Candidate[]       @relation("CandidateCurrentRole")
+  assignments    Assignment[]
+  telegramGroups TelegramGroup[]
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -77,14 +81,17 @@ model Candidate {
   notes          String?
   currentStage   String   @default("APPLIED")
   currentRoleId  String?
+  startToken     String?  @unique // deep-link token: t.me/<bot>?start=<startToken>
   archived       Boolean  @default(false)
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  currentRole  Role?         @relation("CandidateCurrentRole", fields: [currentRoleId], references: [id])
-  applications Application[]
-  messages     Message[]
-  hiredUser    User?         @relation("CandidateToUser")
+  currentRole      Role?             @relation("CandidateCurrentRole", fields: [currentRoleId], references: [id])
+  applications     Application[]
+  messages         Message[]
+  hiredUser        User?             @relation("CandidateToUser")
+  groupMemberships GroupMembership[]
+  activityEvents   ActivityEvent[]
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -122,12 +129,15 @@ model Trial {
   submissionUrls  String    @default("[]") // JSON array of links
   submittedAt     DateTime?
   status          String    @default("not_started") // not_started | active | submitted | expired
+  remind12hSent   Boolean   @default(false)
+  remind2hSent    Boolean   @default(false)
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
   application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
   creator     Creator?    @relation(fields: [creatorId], references: [id])
   scoreCard   ScoreCard?
+  watch       TrialWatch?
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -155,6 +165,7 @@ model ScoreCard {
   scores        String    @default("{}") // JSON {criterion_key: 0-5}
   flags         String    @default("[]") // JSON array of hard-fail flag keys
   weightedTotal Float     @default(0)
+  autoRating    Int? // watcher-derived 1–10 rating
   tier          String? // A | B | C | REJECT
   rationale     String?
   finalized     Boolean   @default(false)
@@ -200,9 +211,10 @@ model User {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  fromCandidate Candidate?  @relation("CandidateToUser", fields: [candidateId], references: [id])
-  managedRoles  Role[]      @relation("RoleManager")
+  fromCandidate Candidate?   @relation("CandidateToUser", fields: [candidateId], references: [id])
+  managedRoles  Role[]       @relation("RoleManager")
   scoreCards    ScoreCard[]
+  assignments   Assignment[] @relation("UserAssignments")
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -245,4 +257,107 @@ model AuditLog {
   entityId    String
   meta        String?
   createdAt   DateTime @default(now())
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 2 — assignments / distribution, Telegram "folders", trial watcher
+// ─────────────────────────────────────────────────────────────────────────────
+
+// A hired VA assigned to a model (creator) under a role. Drives even distribution.
+model Assignment {
+  id            String   @id @default(cuid())
+  userId        String
+  creatorId     String
+  roleId        String
+  managerUserId String?
+  startDate     DateTime @default(now())
+  status        String   @default("probation") // probation | active | ended
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  user    User    @relation("UserAssignments", fields: [userId], references: [id])
+  creator Creator @relation(fields: [creatorId], references: [id])
+  role    Role    @relation(fields: [roleId], references: [id])
+}
+
+// A Telegram group that acts as a "folder" (Bot API can't manage real chat
+// folders, so each folder = a group with a shareable invite link). Resolved by
+// (role, kind, creator): e.g. "X VA – Trial" (kind=trial) or "X VA – Lae"
+// (kind=qualified, creator=Lae).
+model TelegramGroup {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  label     String
+  roleId    String?
+  creatorId String?
+  kind      String   @default("general") // trial | qualified | training | general
+  inviteUrl String?
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  role        Role?             @relation(fields: [roleId], references: [id])
+  creator     Creator?          @relation(fields: [creatorId], references: [id])
+  memberships GroupMembership[]
+}
+
+// Tracks which "folder"/group a candidate has been routed into. Bot API can't
+// confirm joins, so status starts "invited" and is advanced on confirmation.
+model GroupMembership {
+  id          String    @id @default(cuid())
+  groupId     String
+  candidateId String
+  status      String    @default("invited") // invited | joined | removed
+  invitedAt   DateTime  @default(now())
+  joinedAt    DateTime?
+  removedAt   DateTime?
+
+  group     TelegramGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  candidate Candidate     @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, candidateId])
+}
+
+// A watcher monitoring a trial account over its 24h window.
+model TrialWatch {
+  id            String    @id @default(cuid())
+  trialId       String    @unique
+  platform      String // x | instagram | reddit | tiktok
+  accountHandle String?
+  source        String    @default("activity") // reddit | activity | apify
+  status        String    @default("active") // active | stopped
+  intervalMins  Int       @default(60)
+  lastCheckedAt DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  trial        Trial              @relation(fields: [trialId], references: [id], onDelete: Cascade)
+  observations TrialObservation[]
+}
+
+// A single watcher reading: metrics captured at a point in time.
+model TrialObservation {
+  id         String   @id @default(cuid())
+  watchId    String
+  trialId    String
+  source     String
+  capturedAt DateTime @default(now())
+  metrics    String   @default("{}") // JSON: {posts, cadenceMins, removed, karma, ...}
+  notes      String?
+
+  watch TrialWatch @relation(fields: [watchId], references: [id], onDelete: Cascade)
+}
+
+// Lightweight activity stream powering daily digests / morning messages /
+// "are they online today" approximation.
+model ActivityEvent {
+  id          String   @id @default(cuid())
+  candidateId String?
+  userId      String?
+  trialId     String?
+  type        String // post_observed | checkin_reply | submission | online_seen | morning_sent | digest_sent
+  payload     String?
+  createdAt   DateTime @default(now())
+
+  candidate Candidate? @relation(fields: [candidateId], references: [id])
 }

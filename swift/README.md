@@ -165,12 +165,77 @@ swift/
 
 ---
 
-## Roadmap
+## Phase 2 — Watcher, folders, distribution, daily ops (built)
 
-- **Phase 2 — Training gate:** TrainingModule + auto-graded Quiz that gates the
-  trial ("I've read it" → quiz → pass 80% → trial unlocks).
-- **Phase 3 — Account inventory & access tiers:** Account + AccessGrant +
-  Assignment, warm-status pipeline, one-click offboard/revoke.
-- **Phase 4 — AI scoring assist:** Claude draft scores into the Scorer Queue.
-- **Phase 5 — Automations & reporting:** deadline reminders (T-12h/T-2h),
-  auto-expiry, stale-candidate sweep, manager routing, funnel/score reports.
+- **Trial-account watcher → 1–10 rating.** A watcher monitors each trial over its
+  window and lands a **non-finalized auto-draft scorecard** with a 1–10 rating
+  (shown on the scoring screen; sliders pre-filled, you adjust + finalize).
+  Data source per the cost-free design:
+  - **Reddit** — free public API (`src/lib/watcher/reddit.ts`): real post/volume/
+    spacing/removal monitoring.
+  - **X / Instagram / TikTok** — **activity-based** (`src/lib/watcher/activity.ts`):
+    volume + natural spacing of submitted links + check-in responsiveness.
+  - **Apify (optional)** — set `APIFY_TOKEN` to later add richer IG/X scraping;
+    the watcher is pluggable, falls back to activity automatically.
+- **Telegram "folders".** The Bot API can't manage real chat folders, so each
+  folder = a Telegram **group** with an invite link. VAs are routed into the
+  **Trial** group while trialing, then their model's **Qualified** group on hire
+  (e.g. "X VA – Lae"); the bot DMs the link and membership is tracked at
+  **/folders**.
+- **Even distribution across models.** New hires auto-assign to the **least-loaded**
+  model (weighted least-loaded supports non-even target ratios), keeping e.g.
+  Lola/Lae balanced. View at **/vas**.
+- **Daily ops.** The operator gets a **daily VA digest** (what each VA did, who's
+  offline, deadlines, auto-ratings) and VAs get a **morning message** (yesterday's
+  count + today's focus).
+- **Hands-off intake delivery.** The apply form returns a **`/start` deep-link**
+  (`t.me/<bot>?start=<token>`). Telegram bots can't DM someone first, so on the
+  first tap the bot binds the candidate's chat id and **instantly delivers the
+  message for their current stage** (first-touch / training / brief) — the
+  auto-reply actually lands.
+- **Time-based automations** (`src/lib/{deadlines,stale}.ts`): trial **T-12h /
+  T-2h reminders**, **auto-expire** when the 24h window lapses with no
+  submission, and a **stale-candidate sweep** (nudge what's stuck, auto-archive
+  dead role-less applicants).
+- **Self-running scheduler** (`src/lib/scheduler.ts` via `src/instrumentation.ts`).
+  On a persistent server (Railway) the app runs all recurring jobs itself — **no
+  external cron needed.** Cadence: watcher hourly, deadlines every 15m, stale
+  every 6h, morning + digest once/day at `MORNING_HOUR` / `DIGEST_HOUR`
+  (`TZ_OFFSET`). The `/api/cron/*` routes remain as a manual/external backup.
+
+### Deploying on Railway
+
+Railway runs a persistent Node server, so the in-process scheduler just works.
+
+1. New project → deploy this repo; set **root directory** to `swift/`.
+2. Build: `npm run build` · Start: `npm run start`. Add a release/deploy step
+   `npx prisma migrate deploy` (and `npm run db:seed` once) to set up the DB.
+3. Set env vars: `DATABASE_URL` (Railway Postgres — flip `schema.prisma`
+   `provider` to `postgresql`), `TELEGRAM_BOT_TOKEN`, `TELEGRAM_BOT_USERNAME`,
+   `TELEGRAM_WEBHOOK_SECRET`, `TZ_OFFSET`, `MORNING_HOUR`, `DIGEST_HOUR`,
+   `NEXT_PUBLIC_BASE_URL`.
+4. Point the Telegram webhook at the deployment (see "Going live on Telegram").
+
+### Scheduling the cron jobs
+
+Protect with `CRON_SECRET`, then hit these on a schedule (Vercel Cron, GitHub
+Actions, or any external cron):
+
+| Endpoint | Cadence | Does |
+|---|---|---|
+| `/api/cron/watch?secret=…` | hourly | run every due trial watch → refresh ratings |
+| `/api/cron/morning?secret=…` | daily ~08:00 | morning messages to VAs on trial |
+| `/api/cron/daily-digest?secret=…` | daily ~21:00 | operator's daily VA digest |
+
+> "Online today" is approximated by whether the VA messaged the bot today — the
+> Bot API can't read true presence. Real online/last-seen + force-adding to
+> groups + chat-folder management would require a Telethon **userbot**.
+
+## Roadmap (next)
+
+- **Training gate:** TrainingModule + auto-graded Quiz that gates the trial.
+- **Account inventory & access tiers:** Account + AccessGrant, warm-status
+  pipeline, one-click offboard/revoke.
+- **AI scoring assist:** Claude refines the watcher's draft in the Scorer Queue.
+- **Reporting:** funnel conversion, score distributions, time-to-hire.
+- **Optional userbot:** real Telegram folder management + presence + auto-add.
