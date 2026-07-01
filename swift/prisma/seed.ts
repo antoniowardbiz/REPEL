@@ -1,7 +1,9 @@
 /* eslint-disable no-console */
 import { PrismaClient } from "@prisma/client";
 import { CREATORS, ROLES, RUBRICS, TEMPLATES } from "../src/lib/roles-config";
+import { TRAINING_MODULES } from "../src/lib/training-config";
 import { computeWeightedTotal, tierFor } from "../src/lib/scoring";
+import { randomBytes } from "crypto";
 
 const prisma = new PrismaClient();
 
@@ -93,6 +95,26 @@ async function main() {
         create: { roleId: role.id, name: rubric.name, criteria: JSON.stringify(rubric.criteria) },
       });
     }
+
+    const tm = TRAINING_MODULES[r.key];
+    if (tm) {
+      await prisma.trainingModule.upsert({
+        where: { roleId: role.id },
+        update: {
+          title: tm.title,
+          content: tm.content,
+          questions: JSON.stringify(tm.questions),
+          passPct: tm.passPct,
+        },
+        create: {
+          roleId: role.id,
+          title: tm.title,
+          content: tm.content,
+          questions: JSON.stringify(tm.questions),
+          passPct: tm.passPct,
+        },
+      });
+    }
   }
 
   // 4) Templates
@@ -178,6 +200,7 @@ async function main() {
         whyText: opts.why ?? null,
         currentStage: opts.stage,
         currentRoleId: roleId,
+        startToken: randomBytes(9).toString("hex"),
       },
     });
     let application = null;
@@ -202,8 +225,9 @@ async function main() {
     stage: "APPLIED",
   });
 
-  // ROLE_SELECTED — Reddit (routes to Haria)
-  await makeCandidate({
+  // ROLE_SELECTED — Reddit (routes to Haria). At the training gate, so its
+  // deep-link makes a good demo of the training + quiz flow.
+  const liza = await makeCandidate({
     fullName: "Liza Mendoza",
     handle: "@lizam",
     country: "PH",
@@ -211,6 +235,7 @@ async function main() {
     stage: "ROLE_SELECTED",
     why: "I've run NSFW Reddit funnels before and understand karma/verification.",
   });
+  console.log(`  ▶ sample training link: /training/${liza.cand.startToken}`);
 
   // TRIAL_ACTIVE — X VA, clock ticking
   {

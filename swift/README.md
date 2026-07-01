@@ -252,7 +252,19 @@ Actions, or any external cron):
   off. Structured output is forced via a tool call — see
   [`src/lib/ai-scoring.ts`](src/lib/ai-scoring.ts).
 
+## Phase 4 — Training gate + quiz (built)
+
+- **Reading module + auto-graded quiz that gates the trial.** Each role has a
+  `TrainingModule` (reading material + multiple-choice quiz, seeded from
+  [`src/lib/training-config.ts`](src/lib/training-config.ts)). The candidate
+  gets a public deep-link (`/training/<startToken>`) in their training message;
+  they read, take the quiz, and on **≥ passPct (default 80%)** the app
+  **auto-advances them to `TRIAL_READY`** — creating the trial and sending the
+  brief with no operator action. Failing lets them re-read and retake. Attempts
+  are recorded (`QuizAttempt`); status + the link show on the candidate detail
+  page. Logic in [`src/lib/training.ts`](src/lib/training.ts).
+
 ## Roadmap (next)
 
-- **Training gate:** TrainingModule + auto-graded Quiz that gates the trial.
-- **Optional userbot:** real Telegram folder management + presence + auto-add.
+- **Optional userbot:** real Telegram folder management + presence + auto-add
+  (the Bot API can't add users to groups — this needs a Telethon userbot).

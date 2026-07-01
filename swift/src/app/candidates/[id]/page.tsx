@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { Stage, Tier } from "@/lib/constants";
 import { stageBadgeClass, tierBadgeClass, timeAgo, deadlineLabel } from "@/lib/ui";
 import { parseUrls } from "@/lib/serialize";
+import { trainingUrl } from "@/lib/training";
 import CandidateActions from "@/components/CandidateActions";
 
 export const dynamic = "force-dynamic";
@@ -14,9 +15,13 @@ export default async function CandidateDetail({ params }: { params: { id: string
     include: {
       currentRole: true,
       applications: {
-        include: { role: true, trials: { include: { scoreCard: true }, orderBy: { createdAt: "desc" } } },
+        include: {
+          role: { include: { trainingModule: true } },
+          trials: { include: { scoreCard: true }, orderBy: { createdAt: "desc" } },
+        },
         orderBy: { appliedAt: "desc" },
       },
+      quizAttempts: { orderBy: { createdAt: "desc" }, take: 1 },
       messages: { orderBy: { createdAt: "desc" }, take: 50 },
     },
   });
@@ -27,6 +32,8 @@ export default async function CandidateDetail({ params }: { params: { id: string
 
   const primary = candidate.applications[0] ?? null;
   const primaryTrial = primary?.trials[0] ?? null;
+  const trainingModule = primary?.role.trainingModule ?? null;
+  const lastAttempt = candidate.quizAttempts[0] ?? null;
 
   return (
     <div>
@@ -58,6 +65,46 @@ export default async function CandidateDetail({ params }: { params: { id: string
             <section className="card p-4">
               <h2 className="label">Why this role</h2>
               <p className="text-sm text-gray-200">{candidate.whyText}</p>
+            </section>
+          )}
+
+          {trainingModule && (
+            <section className="card p-4">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <h2 className="label mb-0">Training gate</h2>
+                {lastAttempt ? (
+                  <span
+                    className={`pill border ${
+                      lastAttempt.passed
+                        ? "border-good/40 bg-good/15 text-good"
+                        : "border-warn/40 bg-warn/15 text-warn"
+                    }`}
+                  >
+                    {lastAttempt.passed ? `passed · ${lastAttempt.score}%` : `${lastAttempt.score}% — not passed`}
+                  </span>
+                ) : (
+                  <span className="pill border border-line bg-panel2 text-muted">not attempted</span>
+                )}
+              </div>
+              <p className="text-sm text-gray-300">
+                {trainingModule.title} · pass ≥ {trainingModule.passPct}%
+              </p>
+              {candidate.startToken ? (
+                <div className="mt-2">
+                  <a
+                    href={`/training/${candidate.startToken}`}
+                    target="_blank"
+                    className="btn-ghost btn-sm"
+                  >
+                    Open training + quiz ↗
+                  </a>
+                  <p className="mt-1 break-all text-[11px] text-muted">
+                    {trainingUrl(candidate.startToken)}
+                  </p>
+                </div>
+              ) : (
+                <p className="mt-1 text-[11px] text-muted">No deep-link token for this candidate yet.</p>
+              )}
             </section>
           )}
 

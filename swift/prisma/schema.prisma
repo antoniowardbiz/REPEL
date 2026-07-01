@@ -59,6 +59,7 @@ model Role {
   defaultCreator Creator?          @relation("RoleDefaultCreator", fields: [defaultCreatorId], references: [id])
   manager        User?             @relation("RoleManager", fields: [managerUserId], references: [id])
   rubric         Rubric?
+  trainingModule TrainingModule?
   templates      MessageTemplate[]
   applications   Application[]
   candidates     Candidate[]       @relation("CandidateCurrentRole")
@@ -93,6 +94,7 @@ model Candidate {
   hiredUser        User?             @relation("CandidateToUser")
   groupMemberships GroupMembership[]
   activityEvents   ActivityEvent[]
+  quizAttempts     QuizAttempt[]
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -405,4 +407,41 @@ model AccessGrant {
 
   @@index([accountId])
   @@index([userId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 4 — Training gate: a per-role reading module + auto-graded quiz that
+// gates the trial. Passing (>= passPct) auto-advances the candidate to
+// TRIAL_READY (which creates the trial + sends the brief).
+// ─────────────────────────────────────────────────────────────────────────────
+model TrainingModule {
+  id        String   @id @default(cuid())
+  roleId    String   @unique
+  title     String
+  content   String // the reading material (markdown-ish plain text)
+  questions String   @default("[]") // JSON: [{prompt, options:[string], answer:number}]
+  passPct   Int      @default(80)
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  role     Role          @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  attempts QuizAttempt[]
+}
+
+model QuizAttempt {
+  id            String   @id @default(cuid())
+  moduleId      String
+  candidateId   String
+  applicationId String?
+  score         Int // 0–100
+  passed        Boolean  @default(false)
+  answers       String   @default("[]") // JSON: number[] of chosen option indices
+  createdAt     DateTime @default(now())
+
+  module    TrainingModule @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+  candidate Candidate      @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+
+  @@index([moduleId])
+  @@index([candidateId])
 }

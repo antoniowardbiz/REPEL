@@ -16,6 +16,13 @@ import { randomBytes } from "crypto";
 
 export const genStartToken = () => randomBytes(9).toString("hex");
 
+/** Public training-page link for a candidate's deep-link token (empty if none). */
+function trainingLink(token?: string | null): string {
+  if (!token) return "";
+  const base = (process.env.NEXT_PUBLIC_BASE_URL || "").replace(/\/$/, "");
+  return `${base}/training/${token}`;
+}
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 export async function auditLog(action: string, entity: string, entityId: string, meta?: any, actorUserId?: string) {
@@ -50,6 +57,7 @@ async function buildMergeContext(applicationId: string, extra?: Partial<MergeCon
     model_main_url: creator?.xMainUrl ?? "",
     content_drive_url: creator?.contentDriveUrl ?? "",
     training_group_url: app.role.trainingGroupUrl ?? "",
+    training_url: trainingLink(app.candidate.startToken),
     trial_hours: app.role.trialHours,
     role_name: app.role.displayName,
     ...extra,
@@ -73,7 +81,20 @@ export async function sendTemplatedMessage(
     return { skipped: true as const, reason: `no ${category} template` };
   }
   const ctx = await buildMergeContext(applicationId, extra);
-  const body = renderTemplate(template.body, ctx);
+  let body = renderTemplate(template.body, ctx);
+
+  // Training gate: if this role has a quiz and the template didn't already
+  // include the link, append the training CTA so the candidate can unlock the
+  // trial by passing.
+  if (category === "training" && app.candidate.startToken) {
+    const mod = await prisma.trainingModule.findUnique({ where: { roleId: app.roleId } });
+    if (mod && !body.includes("/training/")) {
+      body += `\n\n📚 Complete your training + quiz to unlock your trial:\n${trainingLink(
+        app.candidate.startToken
+      )}`;
+    }
+  }
+
   const result = await sendTelegramMessage(app.candidate.telegramChatId, body);
 
   const message = await prisma.message.create({

@@ -6,6 +6,7 @@ export type MergeContext = {
   model_main_url?: string | null;
   content_drive_url?: string | null;
   training_group_url?: string | null;
+  training_url?: string | null;
   trial_hours?: number | string | null;
   [k: string]: string | number | null | undefined;
 };
