@@ -292,6 +292,23 @@ roles.**
   [`src/lib/roles-config.ts`](src/lib/roles-config.ts) and **not** overwritten by
   re-seeds.
 
+### Deploying Phase 5 to a LIVE instance — read first
+
+- **`AUTO_HIRE` defaults ON.** The first deploy flips the live pipeline to
+  hire-everyone: from then on, any candidate who submits a trial is auto-hired.
+  To roll it out in stages, set `AUTO_HIRE=0` in your host env first, confirm the
+  seeded capacities against your current headcount, then flip it on.
+- **Capacity = live headcount.** `load` counts everyone heading toward or already
+  in a role (excludes only archived/rejected), so a role **closes** once its
+  target is reached and **reopens** only when you raise the target on **/vas** or
+  archive VAs who've left. On first boot, roles already at/over their seeded cap
+  will show "full" on `/apply` and steer new pickers — set caps to match reality
+  before going live.
+- **Idempotent & safe.** Re-submitting a trial for an already-hired VA is a no-op
+  (no re-hire, no duplicate offer). Scoring a hired VA never declines them. The
+  one-time capacity backfill is crash-safe (marker-gated, per-role) and never
+  re-stamps a role you've deliberately set to unlimited.
+
 ## Roadmap (next)
 
 - **Optional userbot:** real Telegram folder management + presence + auto-add

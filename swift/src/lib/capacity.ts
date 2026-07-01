@@ -14,10 +14,6 @@ import { prisma } from "./db";
 // Stages that no longer count against a role's headcount.
 const INACTIVE_STAGES = ["ARCHIVED", "REJECTED"] as const;
 
-// Roles with no explicit capacity are "unlimited". For steering math we give
-// them a large notional target so they stay eligible but don't always dominate
-// a role that has a concrete, unmet target.
-const UNLIMITED_NOTIONAL = 9999;
 const RECENT_WINDOW_DAYS = 14;
 
 export type RoleAvailability = {
@@ -62,9 +58,11 @@ export async function roleAvailability(): Promise<RoleAvailability[]> {
       const capacity = r.capacity ?? null;
       const remaining = capacity == null ? null : Math.max(0, capacity - load);
       const open = capacity == null || load < capacity;
-      // Need score: gap to target (0 when full/closed), with a small recency
-      // bonus so quiet roles rank above equally-empty busy ones.
-      const gap = capacity == null ? UNLIMITED_NOTIONAL - load : capacity - load;
+      // Need score: gap to target, with a small recency bonus so quiet roles
+      // rank above equally-empty busy ones. An unlimited (blanked) role has no
+      // target, so its gap is 0 — it stays eligible (open) but ranks BELOW any
+      // capped role that still has real room, instead of always winning.
+      const gap = capacity == null ? 0 : capacity - load;
       const need = (open ? Math.max(0, gap) : -1) + 1 / (recent + 1);
       return {
         roleId: r.id,
@@ -112,11 +110,17 @@ export async function resolveOpenRoleId(
     return { roleId: preferred.roleId, steered: false, from: preferred.key, to: preferred.key };
   }
 
-  // Otherwise steer to the most-needed open role.
+  // Everything full → never block a hire, and don't yank someone off a valid
+  // pick: honour their preference if they made one, else fall back to the
+  // least-overloaded active role. No steering happens in this case.
   const open = avail.filter((r) => r.open);
-  const target = open[0] ?? avail[0]; // all full → least-overloaded active role
-  if (!target) return { roleId: preferredRoleId, steered: false, from: preferred?.key ?? null, to: null };
+  if (open.length === 0) {
+    const roleId = preferred?.roleId ?? avail[0]?.roleId ?? preferredRoleId;
+    return { roleId, steered: false, from: preferred?.key ?? null, to: roleId ? byId.get(roleId)?.key ?? null : null };
+  }
 
+  // Otherwise steer to the most-needed open role.
+  const target = open[0];
   const steered = !!preferredRoleId && target.roleId !== preferredRoleId;
   return { roleId: target.roleId, steered, from: preferred?.key ?? null, to: target.key };
 }

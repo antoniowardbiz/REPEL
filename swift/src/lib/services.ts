@@ -347,6 +347,17 @@ export async function submitTrial(
   });
 
   await auditLog("trial_submitted", "Trial", trial.id, { submissionUrls }, actorUserId);
+
+  // Idempotency guard: if this application is already hired or closed out, just
+  // record the submission (above) and stop — never re-run the pipeline. Without
+  // this, a repeat POST/submit on an ACTIVE auto-hire would demote them
+  // (ACTIVE→SUBMITTED→…→ACTIVE), re-queue scoring, and DM a second offer.
+  const stage = app.stage as Stage;
+  if (isHiredStage(stage) || stage === "ARCHIVED" || stage === "REJECTED") {
+    await auditLog("resubmission_ignored", "Application", applicationId, { stage }, actorUserId);
+    return trial;
+  }
+
   await moveStage(applicationId, "SUBMITTED", actorUserId);
 
   // Mass-hire: submitting the trial IS the hire. Onboard immediately, send the
@@ -359,6 +370,8 @@ export async function submitTrial(
       await sendTemplatedMessage(applicationId, "offer");
       await moveStage(applicationId, "ACTIVE", actorUserId);
       await auditLog("auto_hired", "Application", applicationId, { reason: "mass_hire_on_submit" }, actorUserId);
+      const cand = await prisma.candidate.findUnique({ where: { id: app.candidateId } });
+      await sendOpsAlert(`✅ Auto-hired ${cand?.fullName ?? app.candidateId} (${app.roleId}) on trial submission.`);
     } catch (e: any) {
       await sendOpsAlert(
         `⚠ Auto-hire hit a snag for application ${applicationId} (${e?.message ?? "unknown"}). They submitted — finish onboarding manually.`
@@ -388,9 +401,12 @@ export async function finalizeScoreCard(trialId: string, input: FinalizeInput) {
   const rubric = trial.application.role.rubric;
   const criteria: RubricCriterion[] = rubric ? JSON.parse(rubric.criteria) : [];
 
-  // If the candidate was already auto-hired, scoring is a quality/training
-  // signal only — record the score but never demote them or send a decline.
-  const alreadyHired = isHiredStage(trial.application.stage);
+  // Scoring is a quality/training signal only — never demote or decline — when
+  // the candidate is already hired OR when mass-hire mode is on. The AUTO_HIRE
+  // check also covers the failure path where an auto-hire hiccup parked the app
+  // at SUBMITTED: without it, a later low score would DM a decline to someone
+  // mass-hire meant to keep.
+  const alreadyHired = isHiredStage(trial.application.stage) || AUTO_HIRE;
 
   const flags = input.flags ?? [];
   const total = computeWeightedTotal(input.scores, criteria);
