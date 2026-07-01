@@ -32,6 +32,7 @@ export type RoleSeed = {
   displayName: string;
   trialHours: number;
   capacity?: number; // target headcount; role "closes" on the apply form when full (omit = unlimited)
+  active?: boolean; // false = retired: hidden from the apply form, steering pool & role pickers (existing people in it are untouched). Defaults true.
   trainingGroupUrl?: string;
   defaultCreator?: string; // creator name
   manager?: string; // manager display name (e.g. Haria for Reddit)
@@ -46,11 +47,16 @@ export const ROLES: RoleSeed[] = [
     defaultCreator: "Lola",
     trainingGroupUrl: "", // <add>
   },
+  // ── Retired: Instagram/TikTok ban waves make these unscalable, so all intake
+  //    now funnels to X and Reddit only. active:false hides them from the apply
+  //    form, the steering pool and role pickers. Anyone already in these roles
+  //    is untouched. Flip active back to true (redeploy) to reopen.
   {
     key: "tiktok_va",
     displayName: "TikTok VA",
     trialHours: 24,
     capacity: 15,
+    active: false,
     defaultCreator: "Lae",
     trainingGroupUrl: "https://t.me/+WIGJd1ocdz83MjU1",
   },
@@ -59,6 +65,7 @@ export const ROLES: RoleSeed[] = [
     displayName: "Instagram Account Manager",
     trialHours: 24,
     capacity: 12,
+    active: false,
     defaultCreator: "Lae",
     trainingGroupUrl: "https://t.me/+IsalwXJfY5dkNWQ1",
   },
@@ -67,6 +74,7 @@ export const ROLES: RoleSeed[] = [
     displayName: "Instagram DM Handler",
     trialHours: 24,
     capacity: 10,
+    active: false,
     defaultCreator: "Lae",
     trainingGroupUrl: "", // <add>
   },
@@ -75,6 +83,7 @@ export const ROLES: RoleSeed[] = [
     displayName: "Video Editor",
     trialHours: 24,
     capacity: 10,
+    active: false,
     defaultCreator: "Lae",
     trainingGroupUrl: "", // <add>
   },
@@ -495,16 +504,12 @@ export const TEMPLATES: TemplateSeed[] = [
     subject: "First touch — which role + why",
     body: `Hey {{first_name}}! Nice to meet you.
 
-First of all, thanks for taking the time to apply. Here are the positions we currently have open:
+Thanks for applying! We're focused on two roles right now:
 
+• X (Twitter) VA
 • Reddit VA
-• X VA
-• TikTok VA
-• Instagram Account Manager
-• Video Editor
-• Instagram DM Handler
 
-Let me know which one is your strong point — and WHY.`,
+Which one is your strong point — and WHY?`,
   },
   {
     key: "training_generic",
