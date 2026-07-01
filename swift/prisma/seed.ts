@@ -72,6 +72,8 @@ async function main() {
       update: {
         displayName: r.displayName,
         trialHours: r.trialHours,
+        // capacity is intentionally omitted here: it's operator-editable in the
+        // UI, and the seed re-runs on every deploy — don't clobber their target.
         trainingGroupUrl: r.trainingGroupUrl || null,
         defaultCreatorId,
         managerUserId,
@@ -80,6 +82,7 @@ async function main() {
         key: r.key,
         displayName: r.displayName,
         trialHours: r.trialHours,
+        capacity: r.capacity ?? null,
         trainingGroupUrl: r.trainingGroupUrl || null,
         defaultCreatorId,
         managerUserId,
@@ -115,6 +118,21 @@ async function main() {
         },
       });
     }
+  }
+
+  // 3b) One-time capacity initialization. Roles that already exist (e.g. on a
+  // live DB from before Phase 5) don't get capacity via the upsert `update`
+  // above — that's deliberate so re-seeds never clobber operator edits. So
+  // apply the seed targets ONCE: only when no role has a capacity set yet.
+  // After the operator sets any target in the UI this backfill goes dormant.
+  const anyCapacity = await prisma.role.count({ where: { capacity: { not: null } } });
+  if (anyCapacity === 0) {
+    for (const r of ROLES) {
+      if (r.capacity != null) {
+        await prisma.role.update({ where: { key: r.key }, data: { capacity: r.capacity } });
+      }
+    }
+    console.log("  seeded role capacities (first-time).");
   }
 
   // 4) Templates

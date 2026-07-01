@@ -75,6 +75,7 @@ across every stage. The public apply form is at **/apply**.
 | `TELEGRAM_WEBHOOK_SECRET` | Shared secret on the webhook URL. |
 | `SLACK_WEBHOOK_URL` / `OPS_TELEGRAM_CHAT_ID` | Internal ops alerts (optional). |
 | `ANTHROPIC_API_KEY` | Phase 4 AI scoring assist (not used in Phase 1). |
+| `AUTO_HIRE` | Mass-hire mode. `1` (default) = hire everyone on trial submission; `0` = classic score-gated flow. |
 | `NEXT_PUBLIC_BASE_URL` | Public base URL for the apply-form link. |
 
 ### Going live on Telegram
@@ -263,6 +264,33 @@ Actions, or any external cron):
   brief with no operator action. Failing lets them re-read and retake. Attempts
   are recorded (`QuizAttempt`); status + the link show on the candidate detail
   page. Logic in [`src/lib/training.ts`](src/lib/training.ts).
+
+## Phase 5 — Mass-hire automation (built)
+
+Built for mass hiring: **onboard everyone, no score gate, and self-balance the
+roles.**
+
+- **Auto-hire on submission (`AUTO_HIRE`, default ON).** The moment a candidate
+  submits their trial they are hired — `submitTrial` runs
+  `SUBMITTED → ONBOARDING → ACTIVE`, creates their `User`, auto-assigns a model,
+  sends the offer, and routes them to their qualified folder. No score gate, no
+  rejections, even a weak trial gets in. Set `AUTO_HIRE=0` for the classic
+  score-gated flow. Logic in [`src/lib/services.ts`](src/lib/services.ts).
+- **Scoring becomes training triage, not a gate.** Scorecards are still created
+  and scoreable; the scorer queue moves auto-hired submissions into a **“Hired —
+  optional quality review”** bucket, and finalizing a low tier on someone
+  already hired just raises a *“queue them for extra training”* ops flag instead
+  of declining them.
+- **Role capacity + steering.** Each role has a `capacity` (target headcount).
+  Everyone still **picks** their role, but when a role hits its target it
+  **closes on the public apply form** and new pickers are steered to the role
+  that needs people most — biggest gap to target first, with a recency tiebreak
+  (so “10 IG DM handlers, no recent Reddit VAs → push to Reddit”). Never blocks a
+  hire: if every role is full, the pick still goes through. Logic in
+  [`src/lib/capacity.ts`](src/lib/capacity.ts); targets are editable live on
+  **/vas** (or `PATCH /api/roles/<key>/capacity`), seeded from
+  [`src/lib/roles-config.ts`](src/lib/roles-config.ts) and **not** overwritten by
+  re-seeds.
 
 ## Roadmap (next)
 

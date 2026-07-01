@@ -12,9 +12,20 @@ import { RubricCriterion } from "./constants";
 import { routeToFolderForStage } from "./folders";
 import { ensureTrialWatch } from "./watcher";
 import { assignVa } from "./distribution";
+import { resolveOpenRoleId } from "./capacity";
 import { randomBytes } from "crypto";
 
 export const genStartToken = () => randomBytes(9).toString("hex");
+
+// Mass-hire mode: when on (default), everyone who SUBMITS their trial is hired
+// on the spot — no score gate, no rejections. The scorecard is still recorded
+// so weak performers can be flagged for training, but it never blocks the hire.
+// Set AUTO_HIRE=0 to fall back to the classic score-gated flow.
+export const AUTO_HIRE = (process.env.AUTO_HIRE ?? "1") !== "0";
+
+// Stages that mean the candidate is already hired (so scoring is informational).
+const HIRED_STAGES = ["ONBOARDING", "ACTIVE"] as const;
+const isHiredStage = (s: string) => (HIRED_STAGES as readonly string[]).includes(s);
 
 /** Public training-page link for a candidate's deep-link token (empty if none). */
 function trainingLink(token?: string | null): string {
@@ -337,6 +348,24 @@ export async function submitTrial(
 
   await auditLog("trial_submitted", "Trial", trial.id, { submissionUrls }, actorUserId);
   await moveStage(applicationId, "SUBMITTED", actorUserId);
+
+  // Mass-hire: submitting the trial IS the hire. Onboard immediately, send the
+  // offer, and go ACTIVE — regardless of score. Scoring still happens (for
+  // training triage) but is no longer a gate. Never let a hiccup here block the
+  // record of the submission.
+  if (AUTO_HIRE) {
+    try {
+      await moveStage(applicationId, "ONBOARDING", actorUserId); // creates User + auto-assigns a model
+      await sendTemplatedMessage(applicationId, "offer");
+      await moveStage(applicationId, "ACTIVE", actorUserId);
+      await auditLog("auto_hired", "Application", applicationId, { reason: "mass_hire_on_submit" }, actorUserId);
+    } catch (e: any) {
+      await sendOpsAlert(
+        `⚠ Auto-hire hit a snag for application ${applicationId} (${e?.message ?? "unknown"}). They submitted — finish onboarding manually.`
+      );
+    }
+  }
+
   return trial;
 }
 
@@ -358,6 +387,10 @@ export async function finalizeScoreCard(trialId: string, input: FinalizeInput) {
   if (!trial) throw new Error("trial not found");
   const rubric = trial.application.role.rubric;
   const criteria: RubricCriterion[] = rubric ? JSON.parse(rubric.criteria) : [];
+
+  // If the candidate was already auto-hired, scoring is a quality/training
+  // signal only — record the score but never demote them or send a decline.
+  const alreadyHired = isHiredStage(trial.application.stage);
 
   const flags = input.flags ?? [];
   const total = computeWeightedTotal(input.scores, criteria);
@@ -388,7 +421,19 @@ export async function finalizeScoreCard(trialId: string, input: FinalizeInput) {
     },
   });
 
-  await auditLog("score_finalized", "ScoreCard", card.id, { total, tier, flags }, input.scorerUserId);
+  await auditLog("score_finalized", "ScoreCard", card.id, { total, tier, flags, alreadyHired }, input.scorerUserId);
+
+  // Already-hired (mass-hire): keep them where they are. Low tier just means
+  // "needs training" — surface it to ops instead of declining anyone.
+  if (alreadyHired) {
+    if (tier === "C" || tier === "REJECT") {
+      await sendOpsAlert(
+        `📚 Quality flag: ${trial.application.role.displayName} hire scored ${total} (${tier}). Queue them for extra training.`
+      );
+    }
+    return { card, total, tier, outcome: null as null, alreadyHired: true };
+  }
+
   await moveStage(trial.applicationId, "DECISION", input.scorerUserId);
 
   // Fire the outcome template (offer / re-trial / decline) per tier.
@@ -409,7 +454,7 @@ export async function finalizeScoreCard(trialId: string, input: FinalizeInput) {
     outcome = { category, sendStatus: r.skipped ? undefined : r.sendStatus };
   }
 
-  return { card, total, tier, outcome };
+  return { card, total, tier, outcome, alreadyHired: false };
 }
 
 // ── Candidate intake ─────────────────────────────────────────────────────────
@@ -425,9 +470,14 @@ export async function intakeCandidate(input: {
   source?: string;
 }) {
   let roleId: string | null = null;
+  let steeredNote: { from: string | null; to: string | null } | null = null;
   if (input.roleKey) {
     const role = await prisma.role.findUnique({ where: { key: input.roleKey } });
-    roleId = role?.id ?? null;
+    // Capacity steering: honour their pick if it's open, otherwise push them to
+    // the role that needs people most (their pick was full).
+    const resolved = await resolveOpenRoleId(role?.id ?? null);
+    roleId = resolved.roleId ?? role?.id ?? null;
+    if (resolved.steered) steeredNote = { from: resolved.from, to: resolved.to };
   }
 
   const startToken = genStartToken();
@@ -451,9 +501,15 @@ export async function intakeCandidate(input: {
     const application = await prisma.application.create({
       data: { candidateId: candidate.id, roleId, whyText: input.whyText || null, stage: "ROLE_SELECTED" },
     });
+    if (steeredNote) {
+      await auditLog("role_steered", "Application", application.id, steeredNote);
+      await sendOpsAlert(
+        `↪ Steered new applicant to ${steeredNote.to} (picked ${steeredNote.from ?? "—"}, which is full).`
+      );
+    }
     // Fire the ROLE_SELECTED automation (training message).
     await moveStage(application.id, "ROLE_SELECTED");
-    return { candidate, applicationId: application.id };
+    return { candidate, applicationId: application.id, steered: steeredNote };
   } else {
     await sendFirstTouch(candidate.id);
     return { candidate, applicationId: null };
@@ -464,13 +520,22 @@ export async function intakeCandidate(input: {
 export async function selectRole(candidateId: string, roleKey: string, whyText?: string) {
   const role = await prisma.role.findUnique({ where: { key: roleKey } });
   if (!role) throw new Error("role not found");
+
+  // Capacity steering: honour the pick if open, else push to the neediest role.
+  const resolved = await resolveOpenRoleId(role.id);
+  const finalRoleId = resolved.roleId ?? role.id;
+
   const application = await prisma.application.create({
-    data: { candidateId, roleId: role.id, whyText: whyText || null, stage: "ROLE_SELECTED" },
+    data: { candidateId, roleId: finalRoleId, whyText: whyText || null, stage: "ROLE_SELECTED" },
   });
   await prisma.candidate.update({
     where: { id: candidateId },
-    data: { currentRoleId: role.id, whyText: whyText || undefined },
+    data: { currentRoleId: finalRoleId, whyText: whyText || undefined },
   });
+  if (resolved.steered) {
+    await auditLog("role_steered", "Application", application.id, { from: resolved.from, to: resolved.to });
+    await sendOpsAlert(`↪ Steered ${role.displayName} pick to ${resolved.to} (picked role is full).`);
+  }
   await moveStage(application.id, "ROLE_SELECTED");
   return application;
 }

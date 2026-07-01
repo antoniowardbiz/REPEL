@@ -31,6 +31,7 @@ export type RoleSeed = {
   key: string;
   displayName: string;
   trialHours: number;
+  capacity?: number; // target headcount; role "closes" on the apply form when full (omit = unlimited)
   trainingGroupUrl?: string;
   defaultCreator?: string; // creator name
   manager?: string; // manager display name (e.g. Haria for Reddit)
@@ -41,6 +42,7 @@ export const ROLES: RoleSeed[] = [
     key: "x_va",
     displayName: "X (Twitter) VA",
     trialHours: 24,
+    capacity: 15,
     defaultCreator: "Lola",
     trainingGroupUrl: "", // <add>
   },
@@ -48,6 +50,7 @@ export const ROLES: RoleSeed[] = [
     key: "tiktok_va",
     displayName: "TikTok VA",
     trialHours: 24,
+    capacity: 15,
     defaultCreator: "Lae",
     trainingGroupUrl: "https://t.me/+WIGJd1ocdz83MjU1",
   },
@@ -55,6 +58,7 @@ export const ROLES: RoleSeed[] = [
     key: "ig_manager",
     displayName: "Instagram Account Manager",
     trialHours: 24,
+    capacity: 12,
     defaultCreator: "Lae",
     trainingGroupUrl: "https://t.me/+IsalwXJfY5dkNWQ1",
   },
@@ -62,6 +66,7 @@ export const ROLES: RoleSeed[] = [
     key: "ig_dm_handler",
     displayName: "Instagram DM Handler",
     trialHours: 24,
+    capacity: 10,
     defaultCreator: "Lae",
     trainingGroupUrl: "", // <add>
   },
@@ -69,6 +74,7 @@ export const ROLES: RoleSeed[] = [
     key: "video_editor",
     displayName: "Video Editor",
     trialHours: 24,
+    capacity: 10,
     defaultCreator: "Lae",
     trainingGroupUrl: "", // <add>
   },
@@ -76,6 +82,7 @@ export const ROLES: RoleSeed[] = [
     key: "reddit_va",
     displayName: "Reddit VA",
     trialHours: 24,
+    capacity: 20,
     manager: "Haria",
     trainingGroupUrl: "", // <Haria Reddit SOP>
   },

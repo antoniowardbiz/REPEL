@@ -13,8 +13,15 @@ export default async function ScorerQueue() {
     orderBy: { submittedAt: "asc" },
   });
 
-  const awaiting = trials.filter((t) => !t.scoreCard?.finalized);
+  const HIRED = ["ONBOARDING", "ACTIVE"];
+  const isHired = (t: (typeof trials)[number]) => HIRED.includes(t.application.stage);
+
   const scored = trials.filter((t) => t.scoreCard?.finalized);
+  const unscored = trials.filter((t) => !t.scoreCard?.finalized);
+  // Auto-hired submissions are already onboarded — scoring them is an optional
+  // quality/training signal, not a gate. Keep them out of the must-do queue.
+  const awaiting = unscored.filter((t) => !isHired(t));
+  const hiredReview = unscored.filter((t) => isHired(t));
 
   const Row = ({ t }: { t: (typeof trials)[number] }) => {
     const urls = parseUrls(t.submissionUrls);
@@ -49,7 +56,8 @@ export default async function ScorerQueue() {
     <div>
       <h1 className="font-display text-2xl font-bold">Scorer Queue</h1>
       <p className="mb-5 text-sm text-muted">
-        Submitted trials. Score against the rubric — weighted total &amp; tier calculate live.
+        Submitted trials. Score against the rubric — weighted total &amp; tier calculate live. In mass-hire
+        mode everyone who submits is already hired; scoring flags who needs extra training.
       </p>
 
       <section className="mb-6">
@@ -61,6 +69,21 @@ export default async function ScorerQueue() {
           ))}
         </div>
       </section>
+
+      {hiredReview.length > 0 && (
+        <section className="mb-6">
+          <h2 className="label">Hired — optional quality review ({hiredReview.length})</h2>
+          <p className="mb-2 text-xs text-muted">
+            Already onboarded via auto-hire. Score them to spot who needs training — it won&apos;t change their
+            hire.
+          </p>
+          <div className="space-y-2 opacity-90">
+            {hiredReview.map((t) => (
+              <Row key={t.id} t={t} />
+            ))}
+          </div>
+        </section>
+      )}
 
       {scored.length > 0 && (
         <section>
