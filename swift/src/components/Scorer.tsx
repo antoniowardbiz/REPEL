@@ -30,6 +30,8 @@ export default function Scorer({
   const [autoSend, setAutoSend] = useState(true);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiMsg, setAiMsg] = useState<string | null>(null);
 
   const total = useMemo(() => computeWeightedTotal(scores, criteria), [scores, criteria]);
   const tier = useMemo(() => tierFor(total, flags), [total, flags]);
@@ -40,6 +42,32 @@ export default function Scorer({
   }
   function toggleFlag(key: string) {
     setFlags((f) => (f.includes(key) ? f.filter((x) => x !== key) : [...f, key]));
+  }
+
+  async function aiDraft() {
+    setAiBusy(true);
+    setAiMsg(null);
+    try {
+      const res = await fetch(`/api/scorecards/${trialId}/ai-draft`, { method: "POST" });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setAiMsg(`⚠ ${j.error ?? "AI draft failed"}`);
+        return;
+      }
+      if (!j.available) {
+        setAiMsg(`🤖 ${j.reason ?? "AI unavailable"}`);
+        return;
+      }
+      const d = j.draft ?? {};
+      if (d.scores) setScores((s) => ({ ...s, ...d.scores }));
+      if (Array.isArray(d.flags)) setFlags(d.flags);
+      if (typeof d.rationale === "string" && d.rationale) setRationale(d.rationale);
+      setAiMsg(
+        `🤖 AI draft applied${d.suggested_tier ? ` (suggests ${d.suggested_tier})` : ""} — review & finalize.`
+      );
+    } finally {
+      setAiBusy(false);
+    }
   }
 
   async function saveDraft() {
@@ -188,6 +216,14 @@ export default function Scorer({
           Auto-send outcome message on finalize
         </label>
         <div className="flex gap-2">
+          <button
+            className="btn-ghost btn-sm"
+            disabled={busy || aiBusy}
+            onClick={aiDraft}
+            title="Let Claude draft the scores from the submission + watcher data"
+          >
+            {aiBusy ? "Drafting…" : "🤖 AI draft"}
+          </button>
           <button className="btn-ghost btn-sm" disabled={busy} onClick={saveDraft}>
             Save draft
           </button>
@@ -196,7 +232,7 @@ export default function Scorer({
           </button>
         </div>
       </div>
-      {msg && <p className="mt-2 text-right text-xs text-muted">{msg}</p>}
+      {(msg || aiMsg) && <p className="mt-2 text-right text-xs text-muted">{aiMsg ?? msg}</p>}
     </div>
   );
 }

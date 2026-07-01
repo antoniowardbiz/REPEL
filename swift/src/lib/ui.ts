@@ -1,4 +1,4 @@
-import { Stage, STAGE_META, Tier } from "./constants";
+import { AccountStatus, ACCOUNT_STATUS_META, Stage, STAGE_META, Tier } from "./constants";
 
 // Server-safe relative time → short string (computed once, passed as prop to
 // avoid client/server hydration mismatches).
@@ -31,6 +31,22 @@ export function deadlineLabel(deadline: Date | string | null | undefined): {
 
 export function stageBadgeClass(stage: Stage): string {
   const tone = STAGE_META[stage]?.tone ?? "neutral";
+  switch (tone) {
+    case "active":
+      return "border-brand/40 text-brand2 bg-brand/10";
+    case "review":
+      return "border-warn/40 text-warn bg-warn/10";
+    case "good":
+      return "border-good/40 text-good bg-good/10";
+    case "bad":
+      return "border-bad/40 text-bad bg-bad/10";
+    default:
+      return "border-line text-muted bg-panel2";
+  }
+}
+
+export function accountStatusBadgeClass(status: string): string {
+  const tone = ACCOUNT_STATUS_META[status as AccountStatus]?.tone ?? "neutral";
   switch (tone) {
     case "active":
       return "border-brand/40 text-brand2 bg-brand/10";

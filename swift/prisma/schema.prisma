@@ -38,6 +38,7 @@ model Creator {
   trials         Trial[]
   assignments    Assignment[]
   telegramGroups TelegramGroup[]
+  accounts       Account[]
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -215,6 +216,7 @@ model User {
   managedRoles  Role[]       @relation("RoleManager")
   scoreCards    ScoreCard[]
   assignments   Assignment[] @relation("UserAssignments")
+  accessGrants  AccessGrant[]
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -360,4 +362,47 @@ model ActivityEvent {
   createdAt   DateTime @default(now())
 
   candidate Candidate? @relation(fields: [candidateId], references: [id])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 3 — Account inventory & access tiers
+// ─────────────────────────────────────────────────────────────────────────────
+
+// A social account in the inventory (belongs to a model/creator). VAs are given
+// access to accounts via AccessGrant; warm-status tracks the account lifecycle.
+model Account {
+  id        String   @id @default(cuid())
+  platform  String // x | instagram | tiktok | reddit | onlyfans | other
+  handle    String
+  label     String?
+  creatorId String?
+  status    String   @default("warming") // warming | active | limited | suspended | banned | retired
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  creator Creator?      @relation(fields: [creatorId], references: [id])
+  grants  AccessGrant[]
+
+  @@index([creatorId])
+}
+
+// A VA's access to an account. Revoking sets status=revoked + revokedAt (the
+// one-click offboard revokes every active grant a user holds).
+model AccessGrant {
+  id        String    @id @default(cuid())
+  accountId String
+  userId    String
+  status    String    @default("active") // active | revoked
+  note      String?
+  grantedAt DateTime  @default(now())
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([accountId])
+  @@index([userId])
 }

@@ -5,6 +5,8 @@ const links = [
   { href: "/scoring", label: "Scorer Queue" },
   { href: "/vas", label: "VAs & Models" },
   { href: "/folders", label: "Folders" },
+  { href: "/accounts", label: "Accounts" },
+  { href: "/reports", label: "Reports" },
   { href: "/templates", label: "Templates" },
   { href: "/roles", label: "Roles" },
   { href: "/apply", label: "Apply ↗" },

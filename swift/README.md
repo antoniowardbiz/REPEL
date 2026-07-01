@@ -231,11 +231,28 @@ Actions, or any external cron):
 > Bot API can't read true presence. Real online/last-seen + force-adding to
 > groups + chat-folder management would require a Telethon **userbot**.
 
+## Phase 3 — Reporting, account inventory & AI scoring (built)
+
+- **Reporting dashboard (`/reports`).** Hiring funnel (applied → role → trial →
+  submitted → scored → hired), conversion rates, tier-outcome and weighted-score
+  distributions, average time-to-hire / scoring turnaround, and a per-role
+  breakdown. Everything is derived from real entities (trials, scorecards,
+  hires) rather than mutable stage strings, so the numbers hold up even on
+  seeded/imported data. See [`src/lib/reports.ts`](src/lib/reports.ts).
+- **Account inventory & access tiers (`/accounts`).** Track each social account
+  per model, its warm-status (`warming → active → limited → suspended → banned →
+  retired`), and which VAs hold access. Grant/revoke per account and **one-click
+  offboard** revokes every account a departing VA can touch. New tables
+  `Account` + `AccessGrant`; logic in [`src/lib/accounts.ts`](src/lib/accounts.ts).
+- **AI scoring assist.** The **🤖 AI draft** button on the scoring screen asks
+  Claude to score every rubric criterion (0–5), flag hard-fails, and suggest a
+  tier from the submission + watcher data; the sliders pre-fill for you to review
+  and finalize. Set `ANTHROPIC_API_KEY` to enable (defaults to `claude-opus-4-8`,
+  override with `ANTHROPIC_MODEL`); with no key the button reports the feature is
+  off. Structured output is forced via a tool call — see
+  [`src/lib/ai-scoring.ts`](src/lib/ai-scoring.ts).
+
 ## Roadmap (next)
 
 - **Training gate:** TrainingModule + auto-graded Quiz that gates the trial.
-- **Account inventory & access tiers:** Account + AccessGrant, warm-status
-  pipeline, one-click offboard/revoke.
-- **AI scoring assist:** Claude refines the watcher's draft in the Scorer Queue.
-- **Reporting:** funnel conversion, score distributions, time-to-hire.
 - **Optional userbot:** real Telegram folder management + presence + auto-add.

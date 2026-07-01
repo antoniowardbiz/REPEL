@@ -85,6 +85,40 @@ export type RoleKey = (typeof ROLE_KEYS)[number];
 export const TRIAL_STATUSES = ["not_started", "active", "submitted", "expired"] as const;
 export type TrialStatus = (typeof TRIAL_STATUSES)[number];
 
+// ── Account inventory & access (Phase 3) ─────────────────────────────────────
+export const ACCOUNT_PLATFORMS = [
+  "x",
+  "instagram",
+  "tiktok",
+  "reddit",
+  "onlyfans",
+  "other",
+] as const;
+export type AccountPlatform = (typeof ACCOUNT_PLATFORMS)[number];
+
+// Lifecycle / warm-status of an account in the inventory.
+export const ACCOUNT_STATUSES = [
+  "warming",
+  "active",
+  "limited",
+  "suspended",
+  "banned",
+  "retired",
+] as const;
+export type AccountStatus = (typeof ACCOUNT_STATUSES)[number];
+
+export const ACCOUNT_STATUS_META: Record<
+  AccountStatus,
+  { label: string; tone: "neutral" | "active" | "review" | "good" | "bad" }
+> = {
+  warming: { label: "Warming", tone: "review" },
+  active: { label: "Active", tone: "good" },
+  limited: { label: "Limited", tone: "review" },
+  suspended: { label: "Suspended", tone: "bad" },
+  banned: { label: "Banned", tone: "bad" },
+  retired: { label: "Retired", tone: "neutral" },
+};
+
 // ── Rubric types ─────────────────────────────────────────────────────────────
 export type RubricCriterion = {
   key: string;
