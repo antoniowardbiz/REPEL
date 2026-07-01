@@ -10,6 +10,7 @@ type Result = {
   correctCount: number;
   total: number;
   unlocked: boolean;
+  answerKey: number[];
 };
 
 export default function Quiz({
@@ -26,9 +27,12 @@ export default function Quiz({
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<Result | null>(null);
 
-  const allAnswered = questions.every((_, i) => answers[i] != null);
+  const answeredCount = questions.filter((_, i) => answers[i] != null).length;
+  const allAnswered = answeredCount === questions.length;
+  const graded = result != null;
 
   async function submit() {
+    if (!allAnswered || busy) return;
     setBusy(true);
     setError(null);
     try {
@@ -44,6 +48,14 @@ export default function Quiz({
         return;
       }
       setResult(j as Result);
+      if ((j as Result).passed && typeof document !== "undefined") {
+        const chip = document.querySelector("#trial .chip");
+        if (chip) {
+          chip.classList.add("unlocked");
+          const txt = chip.querySelector("span:last-child");
+          if (txt) txt.textContent = "Trial · Unlocked";
+        }
+      }
     } catch {
       setError("Network error — please try again.");
     } finally {
@@ -51,86 +63,93 @@ export default function Quiz({
     }
   }
 
-  if (result) {
-    if (result.passed) {
-      return (
-        <div className="card p-6 text-center">
-          <div className="text-4xl">✅</div>
-          <h2 className="mt-2 font-display text-xl font-bold text-good">
-            Passed — {result.score}%
-          </h2>
-          <p className="mt-1 text-sm text-muted">
-            You got {result.correctCount}/{result.total} correct.
-            {result.unlocked
-              ? " Your trial is now unlocked — check your Telegram for the brief and your task."
-              : " Your training is complete."}
-          </p>
-        </div>
-      );
-    }
-    return (
-      <div className="card p-6 text-center">
-        <div className="text-4xl">📚</div>
-        <h2 className="mt-2 font-display text-xl font-bold text-warn">
-          {result.score}% — not quite ({result.passPct}% needed)
-        </h2>
-        <p className="mt-1 text-sm text-muted">
-          You got {result.correctCount}/{result.total} correct. Re-read the material above and try
-          again.
-        </p>
-        <button
-          className="btn-ghost mt-4"
-          onClick={() => {
-            setResult(null);
-            setAnswers({});
-          }}
-        >
-          Retake the quiz
-        </button>
-      </div>
-    );
+  function retake() {
+    setResult(null);
+    setAnswers({});
+    setError(null);
+    if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  function optClass(qi: number, oi: number): string {
+    if (!graded) return answers[qi] === oi ? "opt sel" : "opt";
+    if (oi === result!.answerKey[qi]) return "opt correct";
+    if (oi === answers[qi]) return "opt wrong";
+    return "opt";
   }
 
   return (
-    <div className="card p-5">
-      <h2 className="mb-1 font-display text-lg font-semibold">Quiz</h2>
-      <p className="mb-4 text-sm text-muted">
-        Answer all {questions.length} questions. You need {passPct}% to unlock your trial.
-      </p>
-      <div className="space-y-5">
+    <>
+      <div className="gatehead">
+        <h2>Trial Gate</h2>
+        <div className="meter">
+          <span>{answeredCount}</span> / <span>{questions.length}</span> answered · <b>Pass {passPct}%</b>
+        </div>
+      </div>
+      <div className="gatesub">Answer all questions. Score {passPct}% or higher to unlock your trial.</div>
+
+      <div>
         {questions.map((q, qi) => (
-          <div key={qi} className="rounded-lg border border-line p-3">
-            <div className="mb-2 text-sm font-medium">
-              {qi + 1}. {q.prompt}
+          <div className="q" key={qi}>
+            <div className="q-h">
+              <span className="q-n">Q{qi + 1}</span>
+              <span className="q-t">{q.prompt}</span>
             </div>
-            <div className="space-y-1.5">
+            <div className={`opts ${graded ? "graded" : ""}`}>
               {q.options.map((opt, oi) => (
-                <label
+                <button
                   key={oi}
-                  className={`flex cursor-pointer items-center gap-2 rounded-md border p-2 text-sm ${
-                    answers[qi] === oi
-                      ? "border-brand/60 bg-brand/10"
-                      : "border-line bg-panel2 hover:border-brand/40"
-                  }`}
+                  type="button"
+                  className={optClass(qi, oi)}
+                  onClick={() => {
+                    if (graded) return;
+                    setAnswers((a) => ({ ...a, [qi]: oi }));
+                  }}
                 >
-                  <input
-                    type="radio"
-                    name={`q${qi}`}
-                    className="accent-brand"
-                    checked={answers[qi] === oi}
-                    onChange={() => setAnswers((a) => ({ ...a, [qi]: oi }))}
-                  />
-                  {opt}
-                </label>
+                  <span className="box" />
+                  <span>{opt}</span>
+                </button>
               ))}
             </div>
           </div>
         ))}
       </div>
-      {error && <p className="mt-3 text-sm text-bad">⚠ {error}</p>}
-      <button className="btn-primary mt-4 w-full" disabled={busy || !allAnswered} onClick={submit}>
-        {busy ? "Submitting…" : allAnswered ? "Submit quiz" : "Answer all questions to submit"}
-      </button>
-    </div>
+
+      {error && (
+        <div className="gatesub" style={{ color: "var(--red)", marginTop: 12 }}>
+          ⚠ {error}
+        </div>
+      )}
+
+      {!graded && (
+        <button className="submit" disabled={busy || !allAnswered} onClick={submit}>
+          {busy ? "Submitting…" : "Submit & unlock"}
+        </button>
+      )}
+
+      {graded && (
+        <div className={`result ${result!.passed ? "pass" : ""}`}>
+          <div className="r-chev">»»»</div>
+          <div className="r-status">{result!.passed ? "Trial Unlocked" : "Not Yet"}</div>
+          <div className="r-score">
+            <b>
+              {result!.correctCount} / {result!.total} correct
+            </b>{" "}
+            · {result!.score}% · pass mark {result!.passPct}%
+          </div>
+          <div className="r-msg">
+            {result!.passed
+              ? "Clean pass. Your trial is unlocked — check your Telegram for the brief and your task."
+              : "Review the playbook above and retake. The bar is high because a single account mistake ends a trial."}
+          </div>
+          {!result!.passed && (
+            <div>
+              <button className="r-cta" onClick={retake}>
+                Review &amp; retake
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </>
   );
 }

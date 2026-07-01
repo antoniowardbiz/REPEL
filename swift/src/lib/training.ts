@@ -81,6 +81,7 @@ export type SubmitResult =
       correctCount: number;
       total: number;
       unlocked: boolean;
+      answerKey: number[]; // correct option index per question (revealed after grading)
     }
   | { ok: false; reason: string };
 
@@ -134,5 +135,14 @@ export async function submitQuiz(token: string, answers: number[]): Promise<Subm
     }
   }
 
-  return { ok: true, score, passed, passPct: mod.passPct, correctCount: correct, total, unlocked };
+  return {
+    ok: true,
+    score,
+    passed,
+    passPct: mod.passPct,
+    correctCount: correct,
+    total,
+    unlocked,
+    answerKey: questions.map((q) => Number(q.answer)),
+  };
 }
