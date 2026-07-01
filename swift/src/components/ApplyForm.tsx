@@ -2,7 +2,13 @@
 
 import { useState } from "react";
 
-export default function ApplyForm({ roleOptions }: { roleOptions: { key: string; label: string }[] }) {
+export default function ApplyForm({
+  roleOptions,
+  topNeed,
+}: {
+  roleOptions: { key: string; label: string; open?: boolean }[];
+  topNeed?: string | null;
+}) {
   const [form, setForm] = useState({
     fullName: "",
     telegramHandle: "",
@@ -88,12 +94,22 @@ export default function ApplyForm({ roleOptions }: { roleOptions: { key: string;
           <label className="label">Which role is your strong point?</label>
           <select className="input" value={form.roleKey} onChange={(e) => set("roleKey", e.target.value)}>
             <option value="">— not sure yet —</option>
-            {roleOptions.map((r) => (
-              <option key={r.key} value={r.key}>
-                {r.label}
-              </option>
-            ))}
+            {roleOptions.map((r) => {
+              const closed = r.open === false;
+              return (
+                <option key={r.key} value={r.key} disabled={closed}>
+                  {r.label}
+                  {closed ? " — full" : ""}
+                </option>
+              );
+            })}
           </select>
+          {topNeed && (
+            <p className="mt-1 text-xs text-muted">
+              We especially need <span className="text-brand2">{topNeed}</span> right now — pick it if it fits
+              you.
+            </p>
+          )}
         </div>
         <div>
           <label className="label">…and WHY?</label>

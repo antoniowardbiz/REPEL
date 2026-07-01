@@ -49,6 +49,7 @@ model Role {
   key              String   @unique // x_va | tiktok_va | ig_manager | ig_dm_handler | video_editor | reddit_va
   displayName      String
   trialHours       Int      @default(24)
+  capacity         Int? // target headcount; when the role's active funnel hits this it "closes" on the apply form (null = unlimited)
   trainingGroupUrl String?
   defaultCreatorId String?
   managerUserId    String?

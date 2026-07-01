@@ -72,6 +72,8 @@ async function main() {
       update: {
         displayName: r.displayName,
         trialHours: r.trialHours,
+        // capacity is intentionally omitted here: it's operator-editable in the
+        // UI, and the seed re-runs on every deploy — don't clobber their target.
         trainingGroupUrl: r.trainingGroupUrl || null,
         defaultCreatorId,
         managerUserId,
@@ -80,6 +82,7 @@ async function main() {
         key: r.key,
         displayName: r.displayName,
         trialHours: r.trialHours,
+        capacity: r.capacity ?? null,
         trainingGroupUrl: r.trainingGroupUrl || null,
         defaultCreatorId,
         managerUserId,
@@ -115,6 +118,28 @@ async function main() {
         },
       });
     }
+  }
+
+  // 3b) One-time capacity initialization. Roles that already exist (e.g. on a
+  // live DB from before Phase 5) don't get capacity via the upsert `update`
+  // above — that's deliberate so re-seeds never clobber operator edits. Apply
+  // the seed targets exactly ONCE, gated on a PERSISTENT marker (not on the
+  // capacity values). Keying on a marker instead of `count(capacity != null)`:
+  //   • survives a mid-loop crash — a retry re-runs and fills only the roles
+  //     still NULL (per-role `updateMany where capacity: null`), so no role is
+  //     ever left permanently unset;
+  //   • never re-stamps defaults after the operator blanks roles to "unlimited"
+  //     (null), because the marker — not the null values — says we're done.
+  const CAP_MARKER = "capacities_initialized";
+  const alreadyInit = await prisma.auditLog.findFirst({ where: { action: CAP_MARKER } });
+  if (!alreadyInit) {
+    for (const r of ROLES) {
+      if (r.capacity != null) {
+        await prisma.role.updateMany({ where: { key: r.key, capacity: null }, data: { capacity: r.capacity } });
+      }
+    }
+    await prisma.auditLog.create({ data: { action: CAP_MARKER, entity: "Role", entityId: "all" } });
+    console.log("  seeded role capacities (first-time).");
   }
 
   // 4) Templates

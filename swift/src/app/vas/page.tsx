@@ -1,17 +1,35 @@
 import { prisma } from "@/lib/db";
 import { balanceReport } from "@/lib/distribution";
+import { roleAvailability } from "@/lib/capacity";
+import { AUTO_HIRE } from "@/lib/services";
+import RoleCapacityEditor from "@/components/RoleCapacityEditor";
 
 export const dynamic = "force-dynamic";
 
 export default async function VasPage() {
-  const [report, assignments] = await Promise.all([
+  const [report, assignments, availability] = await Promise.all([
     balanceReport(),
     prisma.assignment.findMany({
       where: { status: { in: ["probation", "active"] } },
       include: { user: true, creator: true, role: true },
       orderBy: { createdAt: "desc" },
     }),
+    roleAvailability(),
   ]);
+
+  const capacityRows = availability
+    .slice()
+    .sort((a, b) => a.displayName.localeCompare(b.displayName))
+    .map((r) => ({
+      key: r.key,
+      displayName: r.displayName,
+      capacity: r.capacity,
+      load: r.load,
+      remaining: r.remaining,
+      open: r.open,
+      recent: r.recent,
+    }));
+  const topNeed = availability.find((r) => r.open) ?? null;
 
   const max = Math.max(1, ...report.loads.map((l) => l.count));
 
@@ -22,6 +40,34 @@ export default async function VasPage() {
         Even distribution across models. New hires auto-assign to the least-loaded model so the split stays
         balanced.
       </p>
+
+      {/* Mass-hire: role headcount targets + steering */}
+      <section className="card mb-6 p-4">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <h2 className="font-display text-base font-semibold">Role headcount &amp; steering</h2>
+          <span
+            className={`pill ${
+              AUTO_HIRE
+                ? "bg-good/15 text-good border border-good/40"
+                : "bg-panel2 text-muted border border-line"
+            }`}
+          >
+            {AUTO_HIRE ? "auto-hire ON" : "auto-hire off"}
+          </span>
+        </div>
+        <p className="mb-3 text-sm text-muted">
+          Everyone still picks their role. When a role hits its target it{" "}
+          <span className="text-white">closes on the apply form</span> and new pickers are steered to the
+          role that needs people most. Blank target = unlimited.
+          {topNeed && (
+            <>
+              {" "}
+              Right now we most need <span className="text-white">{topNeed.displayName}</span>.
+            </>
+          )}
+        </p>
+        <RoleCapacityEditor rows={capacityRows} />
+      </section>
 
       {/* Distribution */}
       <section className="card mb-6 p-4">

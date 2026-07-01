@@ -26,5 +26,8 @@ npm-debug.log*
 /prisma/dev.db
 /prisma/migrations/dev.db
 
+# prisma engine binaries fetched manually for offline builds (never commit)
+/.prisma-engines/
+
 # typescript
 *.tsbuildinfo
