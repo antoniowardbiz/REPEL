@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { submitTrial, deliverStageMessage } from "@/lib/services";
-import { sendOpsAlert } from "@/lib/telegram";
+import { sendOpsAlert, sendTelegramMessage } from "@/lib/telegram";
+import { ROLE_PLATFORM } from "@/lib/roles-config";
 
 // POST /api/telegram/webhook?secret=... — inbound Telegram updates.
 //
@@ -9,13 +10,35 @@ import { sendOpsAlert } from "@/lib/telegram";
 //    and instantly delivers the message for their current stage (first-touch,
 //    training, or brief) — closing the "bots can't DM first" gap.
 //  - First DM from a known @username also binds the chat id + delivers.
-//  - A message with URL(s) during a live trial is treated as a submission.
+//  - During a live trial, a submission is recognised only on clear INTENT: a
+//    link on the role's own platform (x.com / reddit.com …) or an explicit
+//    "submit/done". A stray link never instant-hires anyone.
 //  - Everything else is recorded as inbound history.
 //
 // Always returns 200 so Telegram doesn't retry-storm.
 
 const URL_RE = /\bhttps?:\/\/[^\s]+/gi;
+const SUBMIT_RE = /\b(submit|submitted|done|finished|complete[d]?)\b/i;
 const ok = () => NextResponse.json({ ok: true });
+
+// Which hostnames count as "on the role's platform" for a real submission.
+const PLATFORM_HOSTS: Record<string, string[]> = {
+  x: ["x.com", "twitter.com", "t.co"],
+  reddit: ["reddit.com", "redd.it"],
+  instagram: ["instagram.com"],
+  tiktok: ["tiktok.com"],
+};
+
+function linkOnPlatform(rawUrl: string, platform?: string): boolean {
+  const hosts = platform ? PLATFORM_HOSTS[platform] : undefined;
+  if (!hosts) return false;
+  try {
+    const host = new URL(rawUrl).hostname.replace(/^www\./, "").toLowerCase();
+    return hosts.some((d) => host === d || host.endsWith("." + d));
+  } catch {
+    return false;
+  }
+}
 
 export async function POST(req: Request) {
   const url = new URL(req.url);
@@ -92,17 +115,40 @@ export async function POST(req: Request) {
 
     if (firstBind) await deliverStageMessage(candidate.id);
 
-    // ── submission links during a live trial ─────────────────────────────────
+    // ── submission during a live trial (intent-gated) ────────────────────────
     const links = text ? Array.from(text.matchAll(URL_RE)).map((m) => m[0]) : [];
-    if (links.length > 0) {
+    const saidSubmit = text ? SUBMIT_RE.test(text) : false;
+    if (links.length > 0 || saidSubmit) {
       const app = await prisma.application.findFirst({
         where: { candidateId: candidate.id, stage: { in: ["TRIAL_READY", "TRIAL_ACTIVE"] } },
         orderBy: { stageChangedAt: "desc" },
+        include: { role: true },
       });
-      if (app) await submitTrial(app.id, links);
+      if (app) {
+        const platform = ROLE_PLATFORM[app.role.key];
+        const onPlatform = links.some((u) => linkOnPlatform(u, platform));
+        // Real submission only on clear intent: a link on the role's own
+        // platform, OR an explicit "submit/done" that includes a link. A stray
+        // off-platform link (portfolio, progress pic, signature) is just history.
+        if (onPlatform || (saidSubmit && links.length > 0)) {
+          await submitTrial(app.id, links);
+        } else if (saidSubmit && links.length === 0) {
+          // Said "done" but attached no link — nudge, don't submit.
+          await sendTelegramMessage(
+            chatId,
+            "Almost! Reply with the link to your trial post to submit it ✅"
+          );
+        }
+        // else: off-platform link, no submit intent — recorded as history only.
+      }
     }
   } catch (e) {
     console.error("telegram webhook error:", e);
+    // Make failures VISIBLE instead of swallowing them (a swallowed error here
+    // used to mean a lost submission with no trace).
+    await sendOpsAlert(
+      `⚠ Telegram webhook error for ${username ?? chatId}: ${String((e as any)?.message ?? e).slice(0, 200)}`
+    ).catch(() => {});
   }
 
   return ok();

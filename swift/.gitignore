@@ -23,6 +23,8 @@ npm-debug.log*
 # prisma / sqlite
 /prisma/*.db
 /prisma/*.db-journal
+/prisma/*.db-wal
+/prisma/*.db-shm
 /prisma/dev.db
 /prisma/migrations/dev.db
 

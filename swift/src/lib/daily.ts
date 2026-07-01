@@ -37,23 +37,33 @@ async function postsObservedSince(trialId: string, since: Date) {
   return 0;
 }
 
+// Max VAs/trials to enumerate line-by-line before we switch to a count. Keeps
+// the digest well under Telegram's 4096-char message limit at mass-hire scale.
+const DIGEST_MAX_DETAIL = 25;
+const DIGEST_MAX_CHARS = 3800;
+
 /** Build the operator's daily rundown across active trials + hired VAs. */
 export async function buildDailyDigest(): Promise<string> {
   const today = startOfDay();
-  const lines: string[] = [`📊 *Daily VA digest* — ${today.toDateString()}`, ""];
+  const lines: string[] = [`📊 Daily VA digest — ${today.toDateString()}`, ""];
 
-  // Active trials
+  // Trials GENUINELY in progress = the application is still at TRIAL_READY /
+  // TRIAL_ACTIVE. (Auto-hired trials keep status 'submitted' forever but their
+  // application is ACTIVE — counting those would list every hire as "in
+  // progress" and balloon the message past Telegram's limit.)
+  const inProgressWhere = {
+    status: { in: ["active", "submitted"] },
+    application: { stage: { in: ["TRIAL_READY", "TRIAL_ACTIVE"] } },
+  };
+  const trialCount = await prisma.trial.count({ where: inProgressWhere });
   const trials = await prisma.trial.findMany({
-    where: { status: { in: ["active", "submitted"] } },
-    include: {
-      application: { include: { candidate: true, role: true } },
-      scoreCard: true,
-      watch: true,
-    },
+    where: inProgressWhere,
+    include: { application: { include: { candidate: true, role: true } }, scoreCard: true },
     orderBy: { deadlineAt: "asc" },
+    take: DIGEST_MAX_DETAIL,
   });
-  lines.push(`*Trials in progress (${trials.length})*`);
-  if (trials.length === 0) lines.push("• none");
+  lines.push(`Trials in progress (${trialCount})`);
+  if (trialCount === 0) lines.push("• none");
   for (const t of trials) {
     const c = t.application.candidate;
     const online = (await messagedSince(c.id, today)) > 0;
@@ -61,25 +71,29 @@ export async function buildDailyDigest(): Promise<string> {
     const rating = t.scoreCard?.autoRating;
     const dl = deadlineLabel(t.deadlineAt);
     lines.push(
-      `• ${c.fullName} — ${t.application.role.displayName}: ${posts} posts today, ` +
-        `${rating != null ? `auto ${rating}/10, ` : ""}${dl.text}, ${online ? "🟢 online today" : "🔴 not seen today"}`
+      `• ${c.fullName} — ${t.application.role.displayName}: ${posts} posts, ` +
+        `${rating != null ? `auto ${rating}/10, ` : ""}${dl.text}, ${online ? "🟢" : "🔴"}`
     );
   }
+  if (trialCount > DIGEST_MAX_DETAIL) lines.push(`• …and ${trialCount - DIGEST_MAX_DETAIL} more`);
 
-  // Hired / active VAs
+  // Hired / active VAs — SUMMARISED (per model + per role). Listing every VA at
+  // ~200 hires blows past 4096 chars and the whole digest silently never sends.
   const assignments = await prisma.assignment.findMany({
     where: { status: { in: ["probation", "active"] } },
-    include: { user: { include: { fromCandidate: true } }, creator: true, role: true },
+    include: { creator: true, role: true },
   });
-  lines.push("", `*Active VAs (${assignments.length})*`);
-  if (assignments.length === 0) lines.push("• none");
+  const byModel = new Map<string, number>();
+  const byRole = new Map<string, number>();
   for (const a of assignments) {
-    const candId = a.user.candidateId;
-    const online = candId ? (await messagedSince(candId, today)) > 0 : false;
-    lines.push(
-      `• ${a.user.name} — ${a.role.displayName} @ ${a.creator.name} (${a.status})` +
-        `${candId ? `, ${online ? "🟢 online today" : "🔴 not seen today"}` : ""}`
-    );
+    byModel.set(a.creator.name, (byModel.get(a.creator.name) ?? 0) + 1);
+    byRole.set(a.role.displayName, (byRole.get(a.role.displayName) ?? 0) + 1);
+  }
+  lines.push("", `Active VAs (${assignments.length})`);
+  if (assignments.length === 0) lines.push("• none");
+  else {
+    lines.push("• by model: " + [...byModel.entries()].map(([n, c]) => `${n} ${c}`).join(" · "));
+    lines.push("• by role: " + [...byRole.entries()].map(([n, c]) => `${n} ${c}`).join(" · "));
   }
 
   // Delivery health: outbound messages that actually FAILED today (not the
@@ -87,9 +101,12 @@ export async function buildDailyDigest(): Promise<string> {
   const failed = await prisma.message.count({
     where: { direction: "outbound", status: "failed", createdAt: { gte: today } },
   });
-  if (failed > 0) lines.push("", `⚠ Delivery issues today: ${failed} message(s) failed to send — check the bot token/webhook.`);
+  if (failed > 0) lines.push("", `⚠ ${failed} message(s) failed to send today — check the bot token/webhook.`);
 
-  return lines.join("\n");
+  // Hard cap so a surprise still can't exceed Telegram's limit.
+  let out = lines.join("\n");
+  if (out.length > DIGEST_MAX_CHARS) out = out.slice(0, DIGEST_MAX_CHARS) + "\n… (truncated)";
+  return out;
 }
 
 /** Send the digest to the ops channel and record it. */

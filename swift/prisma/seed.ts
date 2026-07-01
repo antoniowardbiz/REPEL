@@ -74,6 +74,8 @@ async function main() {
         trialHours: r.trialHours,
         // capacity is intentionally omitted here: it's operator-editable in the
         // UI, and the seed re-runs on every deploy — don't clobber their target.
+        // active IS set from config (no live toggle): code owns which roles are open.
+        active: r.active ?? true,
         trainingGroupUrl: r.trainingGroupUrl || null,
         defaultCreatorId,
         managerUserId,
@@ -83,6 +85,7 @@ async function main() {
         displayName: r.displayName,
         trialHours: r.trialHours,
         capacity: r.capacity ?? null,
+        active: r.active ?? true,
         trainingGroupUrl: r.trainingGroupUrl || null,
         defaultCreatorId,
         managerUserId,

@@ -32,6 +32,7 @@ export type RoleSeed = {
   displayName: string;
   trialHours: number;
   capacity?: number; // target headcount; role "closes" on the apply form when full (omit = unlimited)
+  active?: boolean; // false = retired: hidden from the apply form, steering pool & role pickers (existing people in it are untouched). Defaults true.
   trainingGroupUrl?: string;
   defaultCreator?: string; // creator name
   manager?: string; // manager display name (e.g. Haria for Reddit)
@@ -46,11 +47,16 @@ export const ROLES: RoleSeed[] = [
     defaultCreator: "Lola",
     trainingGroupUrl: "", // <add>
   },
+  // ── Retired: Instagram/TikTok ban waves make these unscalable, so all intake
+  //    now funnels to X and Reddit only. active:false hides them from the apply
+  //    form, the steering pool and role pickers. Anyone already in these roles
+  //    is untouched. Flip active back to true (redeploy) to reopen.
   {
     key: "tiktok_va",
     displayName: "TikTok VA",
     trialHours: 24,
     capacity: 15,
+    active: false,
     defaultCreator: "Lae",
     trainingGroupUrl: "https://t.me/+WIGJd1ocdz83MjU1",
   },
@@ -59,6 +65,7 @@ export const ROLES: RoleSeed[] = [
     displayName: "Instagram Account Manager",
     trialHours: 24,
     capacity: 12,
+    active: false,
     defaultCreator: "Lae",
     trainingGroupUrl: "https://t.me/+IsalwXJfY5dkNWQ1",
   },
@@ -67,6 +74,7 @@ export const ROLES: RoleSeed[] = [
     displayName: "Instagram DM Handler",
     trialHours: 24,
     capacity: 10,
+    active: false,
     defaultCreator: "Lae",
     trainingGroupUrl: "", // <add>
   },
@@ -75,6 +83,7 @@ export const ROLES: RoleSeed[] = [
     displayName: "Video Editor",
     trialHours: 24,
     capacity: 10,
+    active: false,
     defaultCreator: "Lae",
     trainingGroupUrl: "", // <add>
   },
@@ -495,42 +504,41 @@ export const TEMPLATES: TemplateSeed[] = [
     subject: "First touch — which role + why",
     body: `Hey {{first_name}}! Nice to meet you.
 
-First of all, thanks for taking the time to apply. Here are the positions we currently have open:
+Thanks for applying! We're focused on two roles right now:
 
+• X (Twitter) VA
 • Reddit VA
-• X VA
-• TikTok VA
-• Instagram Account Manager
-• Video Editor
-• Instagram DM Handler
 
-Let me know which one is your strong point — and WHY.`,
+Which one is your strong point — and WHY?`,
   },
   {
     key: "training_generic",
     roleKey: null,
     category: "training",
     subject: "Training before your trial",
-    body: `Awesome, {{first_name}} — great choice.
+    body: `🔥 Great choice, {{first_name}} — {{role_name}} is one of our highest-earning roles, and we take it seriously. So should you.
 
-Before the trial, read the training top to bottom so you know exactly what good looks like: {{training_group_url}}
+Here's the deal: pass a short training + quiz, then a paid trial. The people who treat this like a real career are the ones earning the most.
 
-Tap "I've read it" when you're done and I'll unlock the next step 🙂`,
+📚 Step 1 — read your training top to bottom (this is exactly what "great" looks like), then complete the quiz at the end:
+{{training_url}}
+
+Pass it and I'll unlock your trial automatically. Let's go 🚀`,
   },
   {
     key: "brief_x_va",
     roleKey: "x_va",
     category: "brief",
     subject: "X VA trial brief",
-    body: `Here's how this works: a {{trial_hours}}hr trial so we can see your skill set. Use any X account — this is just about your ability.
+    body: `🎯 {{first_name}}, this is your X (Twitter) trial — your shot to lock in a paid {{role_name}} spot.
 
-How we operate: post multiple times a day with easy photos and engaging captions, mixing regular feed posts with replies placed under posts that went viral in the last ~20h.
+It's a {{trial_hours}}hr trial. Use any X account (this is about your skill, not the account). Post multiple times a day with strong photos + engaging captions, and place replies under posts that went viral in the last ~20h.
 
-Model for your trial: {{model_name}}.
-Her main page (which you could manage if your trial is strong): {{model_main_url}}
-Content to use: {{content_drive_url}}
+👤 Model: {{model_name}}
+🔗 Her main page (yours to run if your trial is strong): {{model_main_url}}
+📁 Content to use: {{content_drive_url}}
 
-Show me when your first post is up 🙂`,
+Take it seriously — strong trials get hired fast and earn the most. When your first post is up, send the link here with the word SUBMIT 🚀`,
   },
   {
     key: "brief_tiktok_va",
@@ -590,37 +598,41 @@ Send me your first batch of edits when they're ready 🙂`,
     roleKey: "reddit_va",
     category: "brief",
     subject: "Reddit VA trial brief",
-    body: `Training first — read the SOP fully before you start: {{training_group_url}}
+    body: `🎯 {{first_name}}, this is your Reddit trial — your shot to lock in a paid {{role_name}} spot.
 
-This is a {{trial_hours}}hr trial. Post to allowed NSFW subs only, following each sub's rules to the letter. Mind karma/age/verification and account warming — no instant bans. Strong, sub-appropriate titles, and route traffic correctly.
+📚 Read the SOP fully first: {{training_group_url}}
 
-Show me the account you'll be using and your first post when it's up 🙂`,
+It's a {{trial_hours}}hr trial. Post to allowed NSFW subs ONLY, following each sub's rules to the letter. Mind karma/age/verification and warming — no instant bans. Strong, sub-appropriate titles, and route traffic correctly.
+
+Take it seriously — our best Reddit VAs are among our top earners. Send the account you'll use, then post your link with the word SUBMIT when your first post is up 🚀`,
   },
   {
     key: "offer",
     roleKey: null,
     category: "offer",
     subject: "Offer — you're in",
-    body: `{{first_name}}, great news — your trial was strong and we'd love to bring you on for {{model_name}}'s {{role_name}} 🎉
+    body: `🎉 {{first_name}} — you're IN. Welcome to SWIFT.
 
-Next steps: I'll get your onboarding started (payment setup + access). Welcome aboard!`,
+We'd love to bring you on as a {{role_name}} for {{model_name}}. Here's the exciting part: your income scales with your results, and our top performers earn the most — so bring your A-game.
+
+✅ Next: I'll get your onboarding started — payment setup + account access. Let's build something big 🚀`,
   },
   {
     key: "retrial",
     roleKey: null,
     category: "retrial",
     subject: "Re-trial — one more go",
-    body: `{{first_name}}, thanks for the trial — you're close. A couple of things to tighten up:
+    body: `{{first_name}}, you're close — and I don't hand second shots to everyone. A couple of things to tighten up:
 
 {{feedback}}
 
-I'd like to give you one more {{trial_hours}}hr go with that in mind. Up for it? 🙂`,
+Nail these and you're in. I'll give you one more {{trial_hours}}hr go — worth taking seriously. Up for it? 💪`,
   },
   {
     key: "decline",
     roleKey: null,
     category: "decline",
     subject: "Polite decline",
-    body: `Hey {{first_name}}, thanks so much for taking the time to trial with us. It's not the right fit this time, but we genuinely appreciate the effort you put in and wish you the best 🙏`,
+    body: `Hey {{first_name}}, thank you for trialling with SWIFT. It's not the right fit this time — but we genuinely appreciate the effort, and the door isn't closed forever. Wishing you the best 🙏`,
   },
 ];
