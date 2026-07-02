@@ -3,11 +3,12 @@ import { balanceReport } from "@/lib/distribution";
 import { roleAvailability } from "@/lib/capacity";
 import { AUTO_HIRE } from "@/lib/services";
 import RoleCapacityEditor from "@/components/RoleCapacityEditor";
+import ModelLinksEditor from "@/components/ModelLinksEditor";
 
 export const dynamic = "force-dynamic";
 
 export default async function VasPage() {
-  const [report, assignments, availability] = await Promise.all([
+  const [report, assignments, availability, creators] = await Promise.all([
     balanceReport(),
     prisma.assignment.findMany({
       where: { status: { in: ["probation", "active"] } },
@@ -15,7 +16,15 @@ export default async function VasPage() {
       orderBy: { createdAt: "desc" },
     }),
     roleAvailability(),
+    prisma.creator.findMany({ where: { active: true }, orderBy: { name: "asc" } }),
   ]);
+
+  const modelRows = creators.map((c) => ({
+    id: c.id,
+    name: c.name,
+    contentDriveUrl: c.contentDriveUrl ?? "",
+    xMainUrl: c.xMainUrl ?? "",
+  }));
 
   const capacityRows = availability
     .slice()
@@ -40,6 +49,16 @@ export default async function VasPage() {
         Even distribution across models. New hires auto-assign to the least-loaded model so the split stays
         balanced.
       </p>
+
+      {/* Models: content drives + main pages (feed briefs, onboarding & AI answers) */}
+      <section className="card mb-6 p-4">
+        <h2 className="mb-1 font-display text-base font-semibold">Models — drives &amp; links</h2>
+        <p className="mb-3 text-sm text-muted">
+          These links flow straight into trial briefs, the onboarding welcome and the AI support
+          agent. Edit + Save — live immediately, no deploy.
+        </p>
+        <ModelLinksEditor models={modelRows} />
+      </section>
 
       {/* Mass-hire: role headcount targets + steering */}
       <section className="card mb-6 p-4">

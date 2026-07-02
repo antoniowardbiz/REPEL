@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { submitTrial, deliverStageMessage } from "@/lib/services";
 import { sendOpsAlert, sendTelegramMessage } from "@/lib/telegram";
 import { ROLE_PLATFORM } from "@/lib/roles-config";
+import { handleCandidateMessage } from "@/lib/ai-support";
 
 // POST /api/telegram/webhook?secret=... — inbound Telegram updates.
 //
@@ -118,6 +119,7 @@ export async function POST(req: Request) {
     // ── submission during a live trial (intent-gated) ────────────────────────
     const links = text ? Array.from(text.matchAll(URL_RE)).map((m) => m[0]) : [];
     const saidSubmit = text ? SUBMIT_RE.test(text) : false;
+    let handled = firstBind; // first-bind already got their stage message
     if (links.length > 0 || saidSubmit) {
       const app = await prisma.application.findFirst({
         where: { candidateId: candidate.id, stage: { in: ["TRIAL_READY", "TRIAL_ACTIVE"] } },
@@ -132,15 +134,25 @@ export async function POST(req: Request) {
         // off-platform link (portfolio, progress pic, signature) is just history.
         if (onPlatform || (saidSubmit && links.length > 0)) {
           await submitTrial(app.id, links);
+          handled = true;
         } else if (saidSubmit && links.length === 0) {
           // Said "done" but attached no link — nudge, don't submit.
           await sendTelegramMessage(
             chatId,
             "Almost! Reply with the link to your trial post to submit it ✅"
           );
+          handled = true;
         }
         // else: off-platform link, no submit intent — recorded as history only.
       }
+    }
+
+    // ── AI support: answer everything else, 24/7 ─────────────────────────────
+    // Whatever wasn't a deep link, a submission, or a nudge gets the support
+    // agent: it answers from the candidate's real context or escalates to ops.
+    // Fully skipped when ANTHROPIC_API_KEY is unset.
+    if (!handled && text && text.trim().length > 0) {
+      await handleCandidateMessage(candidate.id, chatId, text);
     }
   } catch (e) {
     console.error("telegram webhook error:", e);

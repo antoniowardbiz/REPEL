@@ -107,6 +107,17 @@ export const ROLE_PLATFORM: Record<string, "x" | "instagram" | "reddit" | "tikto
   reddit_va: "reddit",
 };
 
+// Pay terms per role — used in the onboarding welcome + AI support answers.
+// Leave a role blank ("") until real terms exist: the message line auto-drops.
+export const ROLE_PAY: Record<string, string> = {
+  reddit_va: "$2/hr · 4 hrs/day · +10% commission on all spend from your subs",
+  x_va: "", // <set X VA pay terms>
+  tiktok_va: "",
+  ig_manager: "",
+  ig_dm_handler: "",
+  video_editor: "",
+};
+
 // postsPerDay = the trial's daily output target; window is the role's trial_hours.
 export const ROLE_TARGETS: Record<string, { postsPerDay: number; label: string }> = {
   x_va: { postsPerDay: 6, label: "6 feed posts/day + replies under fresh viral posts" },
@@ -491,7 +502,7 @@ export const RUBRICS: Record<string, { name: string; criteria: RubricCriterion[]
 export type TemplateSeed = {
   key: string;
   roleKey?: string | null;
-  category: "first_touch" | "brief" | "offer" | "retrial" | "decline" | "training" | "other";
+  category: "first_touch" | "brief" | "offer" | "retrial" | "decline" | "training" | "onboarding" | "other";
   subject?: string;
   body: string;
 };
@@ -615,6 +626,25 @@ Take it seriously — our best Reddit VAs are among our top earners. Send the ac
 We'd love to bring you on as a {{role_name}} for {{model_name}}. Here's the exciting part: your income scales with your results, and our top performers earn the most — so bring your A-game.
 
 ✅ Next: I'll get your onboarding started — payment setup + account access. Let's build something big 🚀`,
+  },
+  {
+    key: "welcome_active",
+    roleKey: null,
+    category: "onboarding",
+    subject: "Welcome aboard — your full setup",
+    body: `🚀 You're officially on the team, {{first_name}}. Here's your setup — save this message:
+
+👤 Your model: {{model_name}}
+🔗 Her main page: {{model_main_url}}
+📁 Your content drive: {{content_drive_url}}
+🎯 Your daily target: {{daily_target}}
+💰 Your pay: {{pay_line}}
+🧭 Your manager: {{manager_name}}
+👥 Join your team group: {{group_invite_url}}
+
+From here it's simple: hit your daily target, check in every day, and keep the account safe. Payment setup gets confirmed with you at your first check-in.
+
+Questions any time — just message me here and I'll answer right away 🤖`,
   },
   {
     key: "retrial",

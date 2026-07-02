@@ -13,6 +13,7 @@ import { routeToFolderForStage } from "./folders";
 import { ensureTrialWatch } from "./watcher";
 import { assignVa } from "./distribution";
 import { resolveOpenRoleId } from "./capacity";
+import { ROLE_PAY, ROLE_TARGETS } from "./roles-config";
 import { randomBytes } from "crypto";
 
 export const genStartToken = () => randomBytes(9).toString("hex");
@@ -42,7 +43,15 @@ export async function auditLog(action: string, entity: string, entityId: string,
   });
 }
 
-type Category = "first_touch" | "brief" | "offer" | "retrial" | "decline" | "training" | "other";
+type Category =
+  | "first_touch"
+  | "brief"
+  | "offer"
+  | "retrial"
+  | "decline"
+  | "training"
+  | "onboarding"
+  | "other";
 
 async function resolveTemplate(category: Category, roleId?: string | null) {
   // Prefer a role-specific template, then a generic (roleId null) one.
@@ -58,10 +67,30 @@ async function resolveTemplate(category: Category, roleId?: string | null) {
 async function buildMergeContext(applicationId: string, extra?: Partial<MergeContext>): Promise<MergeContext> {
   const app = await prisma.application.findUnique({
     where: { id: applicationId },
-    include: { candidate: true, role: { include: { defaultCreator: true } } },
+    include: { candidate: true, role: { include: { defaultCreator: true, manager: true } } },
   });
   if (!app) throw new Error("application not found");
-  const creator = app.role.defaultCreator;
+
+  // Use the candidate's ACTUAL assigned model when one exists (set at hire) —
+  // the role default is only the pre-hire fallback. Without this, a hire
+  // assigned to Lae could be told they're running Lola.
+  const assignment = await prisma.assignment.findFirst({
+    where: { user: { candidateId: app.candidateId }, status: { in: ["probation", "active"] } },
+    orderBy: { createdAt: "desc" },
+    include: { creator: true },
+  });
+  const creator = assignment?.creator ?? app.role.defaultCreator;
+
+  // Their team group: the qualified group for (role, model) when assigned,
+  // falling back to the role's training group.
+  let groupInvite = "";
+  if (assignment) {
+    const grp = await prisma.telegramGroup.findFirst({
+      where: { roleId: app.roleId, creatorId: assignment.creatorId, kind: "qualified", active: true },
+    });
+    groupInvite = grp?.inviteUrl ?? "";
+  }
+
   return {
     first_name: firstNameOf(app.candidate.fullName),
     model_name: creator?.name ?? "the model",
@@ -71,6 +100,10 @@ async function buildMergeContext(applicationId: string, extra?: Partial<MergeCon
     training_url: trainingLink(app.candidate.startToken),
     trial_hours: app.role.trialHours,
     role_name: app.role.displayName,
+    manager_name: app.role.manager?.name ?? "",
+    daily_target: ROLE_TARGETS[app.role.key]?.label ?? "",
+    pay_line: ROLE_PAY[app.role.key] ?? "",
+    group_invite_url: groupInvite || app.role.trainingGroupUrl || "",
     ...extra,
   };
 }
@@ -369,6 +402,9 @@ export async function submitTrial(
       await moveStage(applicationId, "ONBOARDING", actorUserId); // creates User + auto-assigns a model
       await sendTemplatedMessage(applicationId, "offer");
       await moveStage(applicationId, "ACTIVE", actorUserId);
+      // Full setup message — their model, drive, daily target, pay, group. Sent
+      // after ONBOARDING so the merge context sees the real assignment.
+      await sendTemplatedMessage(applicationId, "onboarding");
       await auditLog("auto_hired", "Application", applicationId, { reason: "mass_hire_on_submit" }, actorUserId);
       const cand = await prisma.candidate.findUnique({ where: { id: app.candidateId } });
       await sendOpsAlert(`✅ Auto-hired ${cand?.fullName ?? app.candidateId} (${app.roleId}) on trial submission.`);
