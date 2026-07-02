@@ -70,7 +70,11 @@ export async function POST(req: Request) {
     if (startMatch) {
       const token = startMatch[1];
       let cand = token ? await prisma.candidate.findUnique({ where: { startToken: token } }) : null;
-      if (!cand && username) cand = await prisma.candidate.findFirst({ where: { telegramHandle: username } });
+      if (!cand && username)
+        cand = await prisma.candidate.findFirst({
+          where: { telegramHandle: username },
+          orderBy: { createdAt: "desc" }, // newest application wins if they re-applied
+        });
       if (cand) {
         await prisma.candidate.update({ where: { id: cand.id }, data: { telegramChatId: chatId } });
         await prisma.message.create({
@@ -86,10 +90,20 @@ export async function POST(req: Request) {
     }
 
     // ── regular message: bind chat id (deliver on first bind) ────────────────
-    let candidate = await prisma.candidate.findFirst({ where: { telegramChatId: chatId } });
+    // Resolve to the MOST RECENT candidate for this chat/handle. During testing
+    // (and real re-applications) one Telegram account can map to several
+    // candidate records; without an order the bot could answer as a stale one,
+    // dropping the reply through to the AI agent instead of the account step.
+    let candidate = await prisma.candidate.findFirst({
+      where: { telegramChatId: chatId },
+      orderBy: { createdAt: "desc" },
+    });
     let firstBind = false;
     if (!candidate && username) {
-      candidate = await prisma.candidate.findFirst({ where: { telegramHandle: username } });
+      candidate = await prisma.candidate.findFirst({
+        where: { telegramHandle: username },
+        orderBy: { createdAt: "desc" },
+      });
       if (candidate) {
         await prisma.candidate.update({ where: { id: candidate.id }, data: { telegramChatId: chatId } });
         firstBind = true;
@@ -151,22 +165,32 @@ export async function POST(req: Request) {
     }
 
     // ── Account check: candidate answering the YES/NO account question ───────
+    // Find the pending account-check trial for this candidate on a managed role
+    // DIRECTLY (not "latest app then look for the trial") so it can't be missed
+    // when the candidate has more than one application. This is what catches the
+    // YES/NO before it falls through to the AI agent.
     if (!handled && text) {
-      const app = await prisma.application.findFirst({
-        where: { candidateId: candidate.id, stage: "TRIAL_READY" },
-        orderBy: { stageChangedAt: "desc" },
-        include: { role: true, trials: true },
+      const gateTrial = await prisma.trial.findFirst({
+        where: {
+          status: "account_check",
+          application: {
+            candidateId: candidate.id,
+            stage: "TRIAL_READY",
+            role: { managerUserId: { not: null } },
+          },
+        },
+        orderBy: { createdAt: "desc" },
+        include: { application: true },
       });
-      const gate = app?.trials.find((t) => t.status === "account_check");
-      if (app && gate && app.role.managerUserId) {
+      if (gateTrial) {
         // Both answers hand off to the manager — she assesses the account and
         // assigns the path (posting vs warm-up). Check NO first: "i don't have
         // one" contains "have one", so a negative must beat the affirmative.
         if (NO_RE.test(text)) {
-          await routeToManagerForAccount(app.id, false); // no account → set up + warm
+          await routeToManagerForAccount(gateTrial.applicationId, false); // no account → set up + warm
           handled = true;
         } else if (YES_RE.test(text)) {
-          await routeToManagerForAccount(app.id, true); // has account → assess & start
+          await routeToManagerForAccount(gateTrial.applicationId, true); // has account → assess & start
           handled = true;
         } else {
           await sendTelegramMessage(
