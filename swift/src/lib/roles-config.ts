@@ -570,16 +570,24 @@ This is a very good role — please take it seriously.
     roleKey: "x_va",
     category: "brief",
     subject: "X VA trial brief",
-    body: `🎯 {{first_name}} — this is a PAID {{trial_hours}}-hour X (Twitter) trial. It's real and it's paid: we run it so you can prove your competence running a model's page. Do it well and you lock in a paid {{role_name}} spot.
+    body: `🎯 Hey {{first_name}}, welcome to the team — let's begin.
+
+This is a PAID {{trial_hours}}-hour X (Twitter) trial.
+
+We run it so you can prove your competence running a model's page. You can use any account you have — this is just to complete the trial.
 
 👤 The model you're operating: {{model_name}} — you'll run her X presence like it's the job.
-🔗 Her main page: {{model_main_url}}
-📁 Post from this content: {{content_drive_url}}
-(No model content yet? Use any strong SFW photos you can source — we're judging your skill, not the exact photos.)
 
-📋 HOW WE OPERATE — your daily targets for the trial:
-{{daily_target}}
-Keep it natural + SFW, put your replies under posts that went viral in the last ~20h, and keep captions teasy + on-brand.
+📁 Post from this content:
+
+{{content_drive_url}}
+
+📋 HOW WE OPERATE:
+
+• 6 feed posts
+• Comment under 5 posts that went viral in the last 24hrs
+• Retweets + horny text 1-3x/day
+• Handle DMs as they come
 
 📚 Full playbook (how we operate, examples, do's & don'ts): {{playbook_url}}
 
