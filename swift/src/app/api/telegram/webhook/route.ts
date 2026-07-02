@@ -44,6 +44,16 @@ function linkOnPlatform(rawUrl: string, platform?: string): boolean {
   }
 }
 
+/** Send a bot reply to the candidate AND record it, so the inline prompts that
+ *  aren't template-driven still show in the Conversations feed and the Telegram
+ *  mirror (nothing the bot says goes unlogged). */
+async function replyAndLog(candidateId: string, chatId: string, body: string, templateKey: string) {
+  const r = await sendTelegramMessage(chatId, body);
+  await prisma.message.create({
+    data: { candidateId, direction: "outbound", channel: "telegram", templateKey, body, status: r.status },
+  });
+}
+
 export async function POST(req: Request) {
   const url = new URL(req.url);
   const secret = url.searchParams.get("secret");
@@ -63,6 +73,13 @@ export async function POST(req: Request) {
   const chatId: string | undefined = msg?.chat?.id ? String(msg.chat.id) : undefined;
   const username: string | undefined = msg?.from?.username ? `@${msg.from.username}` : undefined;
   if (!chatId) return ok();
+
+  // Utility: reply with this chat's id so the operator can grab a group's id for
+  // MIRROR_TELEGRAM_CHAT_ID (add the bot to a group, send /chatid). Works anywhere.
+  if (typeof text === "string" && /^\/(chatid|id)\b/i.test(text.trim())) {
+    await sendTelegramMessage(chatId, `This chat's ID is: ${chatId}\n\nPaste it into MIRROR_TELEGRAM_CHAT_ID to mirror all conversations here.`);
+    return ok();
+  }
 
   try {
     // ── /start <token> deep link ────────────────────────────────────────────
@@ -177,13 +194,15 @@ export async function POST(req: Request) {
           await submitTrial(app.id, links);
           handled = true;
         } else if (saidSubmit && links.length === 0) {
-          await sendTelegramMessage(chatId, "Almost! Reply with the link to your trial post to submit it ✅");
+          await replyAndLog(candidate.id, chatId, "Almost! Reply with the link to your trial post to submit it ✅", "submit_nudge");
           handled = true;
         } else if (onPlatform) {
           // On-platform link, no SUBMIT word — confirm intent rather than hiring.
-          await sendTelegramMessage(
+          await replyAndLog(
+            candidate.id,
             chatId,
-            "Got your link! If that's your finished trial post, reply with the word SUBMIT and the link to send it in ✅"
+            "Got your link! If that's your finished trial post, reply with the word SUBMIT and the link to send it in ✅",
+            "submit_confirm"
           );
           handled = true;
         }
@@ -203,9 +222,11 @@ export async function POST(req: Request) {
         await routeToManagerForAccount(accountGate.applicationId, true); // has account → assess & start
         handled = true;
       } else {
-        await sendTelegramMessage(
+        await replyAndLog(
+          candidate.id,
           chatId,
-          "Just reply YES if you have a Reddit account to use, or NO if you need one set up 🙂"
+          "Just reply YES if you have a Reddit account to use, or NO if you need one set up 🙂",
+          "account_reask"
         );
         handled = true;
       }
