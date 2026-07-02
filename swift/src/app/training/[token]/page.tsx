@@ -158,7 +158,8 @@ export default async function TrainingPage({ params }: { params: { token: string
 
   const role = view.roleName || "Your Role";
 
-  if (view.status === "no_role" || view.status === "no_module") {
+  if (view.status === "no_role" || view.status === "no_module" || view.status === "retired") {
+    const retired = view.status === "retired";
     return (
       <Shell>
         <div className="hero">
@@ -167,14 +168,16 @@ export default async function TrainingPage({ params }: { params: { token: string
             {view.candidateName} · SWIFT VA
           </div>
           <h1>
-            <span className="l1">Almost</span>
-            <span className="l2">There</span>
+            <span className="l1">{retired ? "Role" : "Almost"}</span>
+            <span className="l2">{retired ? "Closed" : "There"}</span>
           </h1>
         </div>
         <div className="msgcard">
           {view.status === "no_role"
             ? "You don't have a role selected yet, so there's no training assigned. We'll message you on Telegram once your role is set."
-            : "There's no training module for your role yet. Watch your Telegram for next steps."}
+            : retired
+              ? "This role isn't open anymore — we've focused hiring on our X (Twitter) and Reddit teams. There's no trial to run here. If you're keen on one of those, just message us on Telegram and we'll get you set up."
+              : "There's no training module for your role yet. Watch your Telegram for next steps."}
         </div>
       </Shell>
     );

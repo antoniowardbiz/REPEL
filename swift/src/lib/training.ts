@@ -14,9 +14,10 @@ export type TrainingView = {
   candidateName: string;
   roleName: string;
   module: { title: string; content: string; passPct: number; questions: PublicQuestion[] } | null;
-  // no_role: no application yet · no_module: role has no training · ready: can
-  // take the quiz · unlocked: already past training (trial created).
-  status: "no_role" | "no_module" | "ready" | "unlocked";
+  // no_role: no application yet · retired: role is closed (active:false) — no
+  // live trial · no_module: role has no training · ready: can take the quiz ·
+  // unlocked: already past training (trial created).
+  status: "no_role" | "retired" | "no_module" | "ready" | "unlocked";
   lastAttempt: { score: number; passed: boolean } | null;
 };
 
@@ -47,6 +48,11 @@ export async function getTrainingByToken(token: string): Promise<TrainingView | 
 
   let status: TrainingView["status"];
   if (!app || !role) status = "no_role";
+  // Retired role (e.g. IG DM Handler / TikTok after ban waves): never present a
+  // live trial, even to a legacy or demo token that predates the close. Real
+  // applicants can't land here (apply form + steering both filter active:true),
+  // so this only ever catches old/demo data — show a neutral "closed" notice.
+  else if (!role.active) status = "retired";
   else if (!mod) status = "no_module";
   else {
     const idx = stageIndex(app.stage as Stage);
@@ -102,6 +108,10 @@ export async function submitQuiz(token: string, answers: number[]): Promise<Subm
   const app = candidate.applications[0] ?? null;
   const mod = app?.role.trainingModule ?? null;
   if (!app || !mod) return { ok: false, reason: "no training is assigned yet" };
+  // Retired role → no live trial. Never grade or advance a token whose role has
+  // been closed (only ever hit by legacy/demo data; new applicants can't reach
+  // an inactive role).
+  if (!app.role.active) return { ok: false, reason: "this role is no longer active" };
 
   const questions = parseJSON<{ prompt: string; answer: number }[]>(mod.questions, []);
   const total = questions.length;

@@ -208,6 +208,71 @@ async function main() {
   }
   console.log(`  telegram groups: ${groupCount}`);
 
+  // ── Demo / sample board data ────────────────────────────────────────────────
+  // This is SAMPLE data for local + preview only. It must NEVER seed fake
+  // candidates onto a live production board — they'd sit next to real applicants
+  // and confuse the operator (e.g. a retired-role "Instagram DM Handler" demo
+  // showing a trial page). Two explicit, independent opt-ins:
+  //   • PURGE_DEMO=1 → one-time cleanup of the known demo rows from a live DB
+  //     that was first seeded before this gate existed. Runs once (marker).
+  //   • SEED_DEMO=1  → (re)create the demo board data. Left unset in production.
+
+  // Exact demo identities, so the purge matches precisely and can never touch a
+  // real applicant/hire: (fullName, telegramHandle) for candidates; plain names
+  // for the fabricated hired VAs.
+  const DEMO_CANDIDATES: [string, string][] = [
+    ["Anna Reyes", "@annareyes"],
+    ["Liza Mendoza", "@lizam"],
+    ["John Cruz", "@johncruz"],
+    ["Maria Santos", "@mariasantos"],
+    ["Grace Lim", "@gracelim"],
+    ["Paolo Garcia", "@paolog"],
+  ];
+  const DEMO_VA_NAMES = ["Rin Tolentino", "Mara Diaz", "Kit Aquino", "Bea Navarro", "Tim Soriano"];
+
+  // One-time demo purge (opt-in). Marker-gated so it runs exactly once even if
+  // the flag is left set across deploys.
+  const PURGE_MARKER = "demo_data_purged";
+  if (process.env.PURGE_DEMO === "1" && !(await prisma.auditLog.findFirst({ where: { action: PURGE_MARKER } }))) {
+    let removedCands = 0;
+    for (const [fullName, telegramHandle] of DEMO_CANDIDATES) {
+      // Match the exact fabricated identity AND only rows never touched by a real
+      // person (no bound Telegram chat). A real applicant sharing a demo's exact
+      // name+handle with no chat bound is vanishingly unlikely.
+      const rows = await prisma.candidate.findMany({
+        where: { fullName, telegramHandle, telegramChatId: null },
+      });
+      for (const c of rows) {
+        // ActivityEvent.candidate has no delete-cascade — clear it first. The
+        // rest (Application→Trial→ScoreCard, Message, QuizAttempt) cascade.
+        await prisma.activityEvent.deleteMany({ where: { candidateId: c.id } });
+        await prisma.candidate.delete({ where: { id: c.id } });
+        removedCands++;
+      }
+    }
+    let removedVas = 0;
+    for (const name of DEMO_VA_NAMES) {
+      // Real hires always have candidateId set (created at onboarding); demo VAs
+      // don't. Managers/admins aren't role "va". Both protect real users.
+      const users = await prisma.user.findMany({ where: { name, role: "va", candidateId: null } });
+      for (const u of users) {
+        await prisma.assignment.deleteMany({ where: { userId: u.id } }); // no cascade from User
+        await prisma.user.delete({ where: { id: u.id } });
+        removedVas++;
+      }
+    }
+    await prisma.auditLog.create({
+      data: { action: PURGE_MARKER, entity: "Candidate", entityId: "demo", meta: JSON.stringify({ removedCands, removedVas }) },
+    });
+    console.log(`  purged demo data: ${removedCands} candidates, ${removedVas} VAs.`);
+  }
+
+  // Only (re)create demo board data when explicitly asked — never in production.
+  if (process.env.SEED_DEMO !== "1") {
+    console.log("  SEED_DEMO not set — skipping demo board data (production-safe).");
+    return;
+  }
+
   // 5) Demo candidates (only if the pipeline is empty) so the board isn't blank.
   const existingCandidates = await prisma.candidate.count();
   if (existingCandidates > 0) {
