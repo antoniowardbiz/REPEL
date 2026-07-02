@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import { getTrainingByToken } from "@/lib/training";
 import Quiz from "@/components/Quiz";
-import { PAYOUT_WINS, PAYOUT_STATS, WINS_CHANNEL_HANDLE, WINS_CHANNEL_URL } from "@/lib/testimonials-config";
+import { winsForRole, PAYOUT_STATS, WINS_CHANNEL_HANDLE, WINS_CHANNEL_URL } from "@/lib/testimonials-config";
 
 export const dynamic = "force-dynamic";
 
@@ -229,7 +229,7 @@ export default async function TrainingPage({ params }: { params: { token: string
             </div>
           ))}
         </div>
-        {PAYOUT_WINS.map((w, i) => (
+        {winsForRole(role).map((w, i) => (
           <div className="winrow" key={i}>
             <div className="who">
               {w.handle} <em>· {w.role}</em>
