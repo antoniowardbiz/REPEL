@@ -5,9 +5,17 @@ export type MergeContext = {
   model_name?: string | null;
   model_main_url?: string | null;
   content_drive_url?: string | null;
+  trial_content_url?: string | null;
   training_group_url?: string | null;
   training_url?: string | null;
   trial_hours?: number | string | null;
+  manager_name?: string | null;
+  manager_label?: string | null;
+  manager_handle?: string | null;
+  daily_target?: string | null;
+  pay_line?: string | null;
+  group_invite_url?: string | null;
+  role_name?: string | null;
   [k: string]: string | number | null | undefined;
 };
 

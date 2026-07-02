@@ -121,6 +121,18 @@ export const ROLE_PAY: Record<string, string> = {
   video_editor: "",
 };
 
+// Optional per-role TRIAL content folder (what candidates post during the trial,
+// before they're assigned a model at hire). Blank → the "content to post" line
+// drops from the trial steps. Set via a Drive/folder link when you have one.
+export const ROLE_TRIAL_CONTENT: Record<string, string> = {
+  reddit_va: "", // <trial content folder for Reddit VAs>
+  x_va: "", // <trial content folder for X VAs>
+  tiktok_va: "",
+  ig_manager: "",
+  ig_dm_handler: "",
+  video_editor: "",
+};
+
 // postsPerDay = the trial's daily output target; window is the role's trial_hours.
 export const ROLE_TARGETS: Record<string, { postsPerDay: number; label: string }> = {
   x_va: {
@@ -509,7 +521,17 @@ export const RUBRICS: Record<string, { name: string; criteria: RubricCriterion[]
 export type TemplateSeed = {
   key: string;
   roleKey?: string | null;
-  category: "first_touch" | "brief" | "offer" | "retrial" | "decline" | "training" | "onboarding" | "other";
+  category:
+    | "first_touch"
+    | "brief"
+    | "offer"
+    | "retrial"
+    | "decline"
+    | "training"
+    | "onboarding"
+    | "account_check"
+    | "account_setup"
+    | "other";
   subject?: string;
   body: string;
 };
@@ -615,13 +637,15 @@ Send me your first batch of edits when they're ready 🙂`,
     roleKey: "reddit_va",
     category: "brief",
     subject: "Reddit VA trial brief",
-    body: `🎯 {{first_name}}, this is your Reddit trial — your shot to lock in a paid {{role_name}} spot.
+    body: `🎯 You're set, {{first_name}} — here's your Reddit trial ({{trial_hours}}h):
 
-📚 Read the SOP fully first: {{training_group_url}}
+📁 Content to post: {{trial_content_url}}
+📋 Post to allowed NSFW subs, following each sub's rules (karma / verification / spacing). Strong, sub-appropriate titles.
 
-It's a {{trial_hours}}hr trial. Post to allowed NSFW subs ONLY, following each sub's rules to the letter. Mind karma/age/verification and warming — no instant bans. Strong, sub-appropriate titles, and route traffic correctly.
+✅ PASS: your posts stay up (no removals), account stays safe (no ban), titles fit each sub.
+❌ FAIL: account gets banned, or you ignore sub rules.
 
-Take it seriously — our best Reddit VAs are among our top earners. Send the account you'll use, then post your link with the word SUBMIT when your first post is up 🚀`,
+When your first post is up, send the link here with the word SUBMIT 🚀`,
   },
   {
     key: "offer",
@@ -635,6 +659,29 @@ We'd love to bring you on as a {{role_name}} for {{model_name}}. Here's the exci
 ✅ Next: I'll get your onboarding started — payment setup + account access. Let's build something big 🚀`,
   },
   {
+    key: "account_check",
+    roleKey: null,
+    category: "account_check",
+    subject: "Account check before the trial",
+    body: `Nice work passing, {{first_name}} 🎉 One quick thing before your trial:
+
+Do you already have a Reddit account you can use? (ideally with a bit of karma/age — not brand new)
+
+Reply YES if you have one, or NO if you need one set up 👇`,
+  },
+  {
+    key: "account_setup",
+    roleKey: null,
+    category: "account_setup",
+    subject: "Get set up with an account",
+    body: `No problem, {{first_name}} — that's completely normal 👍
+
+{{manager_name}} handles account setup and warms it properly so it never gets banned. Message her now to get started:
+👉 {{manager_handle}}
+
+Once you're set up with an account, come back here and reply "ready" — we'll start your trial straight away.`,
+  },
+  {
     key: "welcome_active",
     roleKey: null,
     category: "onboarding",
@@ -646,7 +693,7 @@ We'd love to bring you on as a {{role_name}} for {{model_name}}. Here's the exci
 📁 Your content drive: {{content_drive_url}}
 🎯 Your daily target: {{daily_target}}
 💰 Your pay: {{pay_line}}
-🧭 Your manager: {{manager_name}}
+🧭 Your manager: {{manager_label}}
 👥 Join your team group: {{group_invite_url}}
 
 From here it's simple: hit your daily target, check in every day, and keep the account safe. Payment setup gets confirmed with you at your first check-in.
