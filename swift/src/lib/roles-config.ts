@@ -28,6 +28,23 @@ export const CREATORS: CreatorSeed[] = [
   },
 ];
 
+// Managers (staff who oversee models/VAs) and the models each one covers. Haria
+// is also the Reddit VA manager (that link comes from ROLES.reddit_va.manager).
+// Roster only for now — these don't yet drive any candidate messaging.
+export type ManagerSeed = {
+  name: string;
+  telegramHandle?: string;
+  redditManager?: boolean; // also manages all Reddit VAs
+  models: string[]; // creator names this manager oversees
+};
+
+export const MANAGERS: ManagerSeed[] = [
+  { name: "Haria", telegramHandle: "@swiftreddit", redditManager: true, models: ["Lola", "Lae"] },
+  { name: "Hera", models: ["Lola", "Lae"] },
+  { name: "Zaidee", models: ["Lola"] },
+  { name: "Tina", models: ["Lae"] },
+];
+
 export type RoleSeed = {
   key: string;
   displayName: string;
