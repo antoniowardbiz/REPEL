@@ -85,7 +85,7 @@ export type RoleKey = (typeof ROLE_KEYS)[number];
 export const TRIAL_STATUSES = [
   "not_started",
   "account_check", // asked if they have an account; awaiting yes/no
-  "needs_account", // no account → routed to the manager to set one up
+  "with_manager", // handed to the role manager (has account → assess, or none → set up + warm)
   "active",
   "submitted",
   "expired",

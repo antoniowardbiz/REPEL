@@ -530,6 +530,7 @@ export type TemplateSeed = {
     | "training"
     | "onboarding"
     | "account_check"
+    | "account_ready"
     | "account_setup"
     | "other";
   subject?: string;
@@ -670,16 +671,27 @@ Do you already have a Reddit account you can use? (ideally with a bit of karma/a
 Reply YES if you have one, or NO if you need one set up 👇`,
   },
   {
+    key: "account_ready",
+    roleKey: null,
+    category: "account_ready",
+    subject: "Send your account to your manager",
+    body: `Great, {{first_name}}! 🙌 Next step is with {{manager_name}}, your manager.
+
+Send your Reddit account to her — 👉 {{manager_handle}} — she'll check it's ready and get you posting. If it needs warming up first, she'll sort that so it never gets banned.
+
+Once you're posting, drop your post link here with the word SUBMIT 🚀`,
+  },
+  {
     key: "account_setup",
     roleKey: null,
     category: "account_setup",
     subject: "Get set up with an account",
-    body: `No problem, {{first_name}} — that's completely normal 👍
+    body: `No problem, {{first_name}} — totally normal 👍
 
-{{manager_name}} handles account setup and warms it properly so it never gets banned. Message her now to get started:
+{{manager_name}}, your manager, will set you up with an account and warm it properly so it never gets banned. Message her to get started:
 👉 {{manager_handle}}
 
-Once you're set up with an account, come back here and reply "ready" — we'll start your trial straight away.`,
+Once you're posting, drop your link here with the word SUBMIT 🚀`,
   },
   {
     key: "welcome_active",

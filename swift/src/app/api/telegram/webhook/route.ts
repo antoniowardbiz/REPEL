@@ -1,11 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import {
-  submitTrial,
-  deliverStageMessage,
-  confirmAccountAndStartTrial,
-  routeToManagerForAccount,
-} from "@/lib/services";
+import { submitTrial, deliverStageMessage, routeToManagerForAccount } from "@/lib/services";
 import { sendOpsAlert, sendTelegramMessage } from "@/lib/telegram";
 import { ROLE_PLATFORM } from "@/lib/roles-config";
 import { handleCandidateMessage } from "@/lib/ai-support";
@@ -162,15 +157,16 @@ export async function POST(req: Request) {
         orderBy: { stageChangedAt: "desc" },
         include: { role: true, trials: true },
       });
-      const gate = app?.trials.find((t) => t.status === "account_check" || t.status === "needs_account");
+      const gate = app?.trials.find((t) => t.status === "account_check");
       if (app && gate && app.role.managerUserId) {
-        // Check NO first: "i don't have one" contains "have one", so a negative
-        // must win over the affirmative pattern.
+        // Both answers hand off to the manager — she assesses the account and
+        // assigns the path (posting vs warm-up). Check NO first: "i don't have
+        // one" contains "have one", so a negative must beat the affirmative.
         if (NO_RE.test(text)) {
-          if (gate.status !== "needs_account") await routeToManagerForAccount(app.id); // → manager
+          await routeToManagerForAccount(app.id, false); // no account → set up + warm
           handled = true;
         } else if (YES_RE.test(text)) {
-          await confirmAccountAndStartTrial(app.id); // has an account → start the trial
+          await routeToManagerForAccount(app.id, true); // has account → assess & start
           handled = true;
         } else {
           await sendTelegramMessage(

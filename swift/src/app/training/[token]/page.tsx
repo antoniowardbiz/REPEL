@@ -90,6 +90,10 @@ const TRIAL_CSS = `
   letter-spacing:1px;text-transform:uppercase;color:var(--ink);background:transparent;border:1px solid var(--line-strong);
   border-radius:9px;padding:12px 22px;cursor:pointer;transition:.2s ease}
 #trial .r-cta:hover{transform:translateY(-1px);border-color:var(--red);color:#fff}
+#trial .r-weak{margin-top:16px;border-top:1px solid var(--line);padding-top:14px}
+#trial .r-weak-h{font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--red);margin-bottom:8px}
+#trial .r-weak ul{margin:0;padding-left:18px;color:var(--ink-dim);font-size:14px}
+#trial .r-weak li{margin:3px 0}
 #trial .msgcard{margin-top:20px;border:1px solid var(--line);background:var(--surface);border-radius:12px;padding:24px;color:var(--ink-dim);font-size:15px}
 #trial .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
 #trial .stat{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 10px;text-align:center}

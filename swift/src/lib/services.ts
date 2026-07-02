@@ -52,6 +52,7 @@ type Category =
   | "training"
   | "onboarding"
   | "account_check"
+  | "account_ready"
   | "account_setup"
   | "other";
 
@@ -217,11 +218,14 @@ export async function deliverStageMessage(candidateId: string) {
   if (!app || stage === "APPLIED") return sendFirstTouch(candidateId);
   if (stage === "ROLE_SELECTED" || stage === "TRAINING") return sendTemplatedMessage(app.id, "training");
   if (stage === "TRIAL_READY" || stage === "TRIAL_ACTIVE") {
-    // If we're still waiting on the account question, re-send that (not the brief).
-    const trial = await prisma.trial.findFirst({
-      where: { applicationId: app.id, status: { in: ["account_check", "needs_account"] } },
+    // Awaiting the account answer → re-send the question. Already with the
+    // manager → nudge them there. Otherwise (X self-serve) → the brief.
+    const gate = await prisma.trial.findFirst({
+      where: { applicationId: app.id, status: { in: ["account_check", "with_manager"] } },
     });
-    return sendTemplatedMessage(app.id, trial ? "account_check" : "brief");
+    if (gate?.status === "account_check") return sendTemplatedMessage(app.id, "account_check");
+    if (gate?.status === "with_manager") return { skipped: true as const };
+    return sendTemplatedMessage(app.id, "brief");
   }
   return { skipped: true as const };
 }
@@ -418,33 +422,55 @@ export async function startTrial(applicationId: string): Promise<{ effects: stri
   return { effects };
 }
 
-/** Candidate confirmed they HAVE an account → start their trial for real. */
-export async function confirmAccountAndStartTrial(applicationId: string) {
-  const r = await startTrial(applicationId);
-  await moveStage(applicationId, "TRIAL_ACTIVE");
-  await auditLog("account_confirmed", "Application", applicationId, { effects: r.effects });
-  return r;
-}
-
-/** Candidate has NO account → hand them to the role's manager to set one up. */
-export async function routeToManagerForAccount(applicationId: string) {
+/**
+ * Hand a candidate to the role's manager (e.g. Reddit → Haria). The manager
+ * assesses the account and assigns the right path — a good account may be ready
+ * for full posting, a weak/absent one needs setup + warming — because the trial
+ * content depends on the account. Works for both "I have an account" (assess &
+ * start) and "I don't" (set up + warm). The manager also gets the candidate's
+ * quiz diagnostics so they know what to reinforce.
+ */
+export async function routeToManagerForAccount(applicationId: string, hasAccount: boolean) {
   const app = await prisma.application.findUnique({
     where: { id: applicationId },
-    include: { role: { include: { manager: true } }, candidate: true, trials: true },
+    include: { role: { include: { manager: true, trainingModule: true } }, candidate: true, trials: true },
   });
   if (!app) throw new Error("application not found");
-  const trial = app.trials.find((t) => t.status === "account_check" || t.status === "needs_account");
-  if (trial) await prisma.trial.update({ where: { id: trial.id }, data: { status: "needs_account" } });
-  await sendTemplatedMessage(applicationId, "account_setup");
-  await prisma.notification.create({
-    data: { type: "needs_account_setup", channel: "ops", payload: JSON.stringify({ applicationId, candidate: app.candidate.fullName, manager: app.role.manager?.name }) },
+  const trial = app.trials.find((t) => t.status === "account_check" || t.status === "with_manager");
+  if (trial) await prisma.trial.update({ where: { id: trial.id }, data: { status: "with_manager" } });
+
+  await sendTemplatedMessage(applicationId, hasAccount ? "account_ready" : "account_setup");
+
+  // Quiz diagnostics for the manager: score + the topics they got wrong.
+  let quizNote = "";
+  const attempt = await prisma.quizAttempt.findFirst({
+    where: { candidateId: app.candidateId },
+    orderBy: { createdAt: "desc" },
   });
+  if (attempt && app.role.trainingModule) {
+    try {
+      const qs = JSON.parse(app.role.trainingModule.questions) as { prompt: string; answer: number }[];
+      const ans = JSON.parse(attempt.answers) as number[];
+      const weak = qs.filter((q, i) => Number(ans[i]) !== Number(q.answer)).map((q) => q.prompt);
+      quizNote = ` · quiz ${attempt.score}%${weak.length ? ` — reinforce: ${weak.slice(0, 2).join("; ")}` : ""}`;
+    } catch {
+      /* ignore */
+    }
+  }
+
   const mgr = app.role.manager;
   await sendOpsAlert(
-    `🧰 ${app.candidate.fullName} (${app.role.displayName}) needs an account set up + warmed` +
-      (mgr ? ` → ${mgr.name}${mgr.telegramHandle ? ` (${mgr.telegramHandle})` : ""}` : "")
+    `🧰 ${app.candidate.fullName} (${app.role.displayName}) → ${mgr?.name ?? "manager"}` +
+      `${mgr?.telegramHandle ? ` (${mgr.telegramHandle})` : ""}: ${hasAccount ? "HAS an account — assess & start posting" : "needs an account set up + warmed"}${quizNote}`
   );
-  await auditLog("routed_for_account", "Application", applicationId, { manager: mgr?.name });
+  await prisma.notification.create({
+    data: {
+      type: "manager_handoff",
+      channel: "ops",
+      payload: JSON.stringify({ applicationId, hasAccount, candidate: app.candidate.fullName, manager: mgr?.name }),
+    },
+  });
+  await auditLog("routed_to_manager", "Application", applicationId, { hasAccount, manager: mgr?.name });
 }
 
 // ── Trial submission ─────────────────────────────────────────────────────────
