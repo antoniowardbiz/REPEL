@@ -12,6 +12,7 @@ export type MergeContext = {
   manager_name?: string | null;
   manager_label?: string | null;
   manager_handle?: string | null;
+  manager_link?: string | null; // tappable t.me/<handle> deep link
   daily_target?: string | null;
   pay_line?: string | null;
   group_invite_url?: string | null;

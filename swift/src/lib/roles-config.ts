@@ -572,11 +572,13 @@ This is a very good role — please take it seriously.
     subject: "X VA trial brief",
     body: `🎯 {{first_name}}, this is your X (Twitter) trial — your shot to lock in a paid {{role_name}} spot.
 
-It's a {{trial_hours}}hr trial. Use any X account (this is about your skill, not the account). Post multiple times a day with strong photos + engaging captions, and place replies under posts that went viral in the last ~20h.
+It's a {{trial_hours}}hr trial. Use any X account (this is about your skill, not the account). Post multiple times a day with strong, teasy SFW photos + engaging captions, and place replies under posts that went viral in the last ~20h.
+
+📸 Content: this is a skills test — if you don't have model content yet, just use any strong SFW photos you can source. We're judging your posting, captions, timing and replies, not the specific photos.
 
 👤 Model: {{model_name}}
 🔗 Her main page (yours to run if your trial is strong): {{model_main_url}}
-📁 Content to use: {{content_drive_url}}
+📁 Content folder (if provided): {{content_drive_url}}
 
 Take it seriously — strong trials get hired fast and earn the most. When your first post is up, send the link here with the word SUBMIT 🚀`,
   },
@@ -675,9 +677,14 @@ Reply YES if you have one, or NO if you need one set up 👇`,
     roleKey: null,
     category: "account_ready",
     subject: "Send your account to your manager",
-    body: `Great, {{first_name}}! 🙌 Next step is with {{manager_name}}, your manager.
+    body: `Great, {{first_name}}! 🙌 Your next step is with your manager, {{manager_name}}.
 
-Send your Reddit account to her — 👉 {{manager_handle}} — she'll check it's ready and get you posting. If it needs warming up first, she'll sort that so it never gets banned.
+👉 Tap here to message her: {{manager_link}}  ({{manager_handle}})
+
+Copy-paste this to start:
+"Hi! I passed the Reddit VA quiz ✅ I already have a Reddit account — here it is: [paste your username]. What should I post?"
+
+{{manager_name}} will check it's ready (and warm it up first if needed so it never gets banned), then tell you exactly what to post.
 
 Once you're posting, drop your post link here with the word SUBMIT 🚀`,
   },
@@ -686,10 +693,14 @@ Once you're posting, drop your post link here with the word SUBMIT 🚀`,
     roleKey: null,
     category: "account_setup",
     subject: "Get set up with an account",
-    body: `No problem, {{first_name}} — totally normal 👍
+    body: `No problem, {{first_name}} — totally normal 👍 Your next step is with your manager, {{manager_name}}.
 
-{{manager_name}}, your manager, will set you up with an account and warm it properly so it never gets banned. Message her to get started:
-👉 {{manager_handle}}
+👉 Tap here to message her: {{manager_link}}  ({{manager_handle}})
+
+Copy-paste this to start:
+"Hi! I passed the Reddit VA quiz ✅ I don't have a Reddit account yet — can you set me up?"
+
+{{manager_name}} will get you an account and warm it properly so it never gets banned, then tell you exactly what to post.
 
 Once you're posting, drop your link here with the word SUBMIT 🚀`,
   },

@@ -6,7 +6,7 @@ import { prisma } from "./db";
 import { Stage } from "./constants";
 import { automationOnEnter } from "./stages";
 import { renderTemplate, firstNameOf, MergeContext } from "./templates";
-import { sendTelegramMessage, sendOpsAlert } from "./telegram";
+import { sendTelegramMessage, sendOpsAlert, telegramConfigured } from "./telegram";
 import { computeWeightedTotal, tierFor } from "./scoring";
 import { RubricCriterion } from "./constants";
 import { routeToFolderForStage } from "./folders";
@@ -110,6 +110,10 @@ async function buildMergeContext(applicationId: string, extra?: Partial<MergeCon
       ? `${manager.name} (${manager.telegramHandle})`
       : manager.name
     : "";
+  // Tappable deep link to the manager's Telegram (from @handle → t.me/handle).
+  const managerLink = manager?.telegramHandle
+    ? `https://t.me/${manager.telegramHandle.replace(/^@/, "")}`
+    : "";
 
   return {
     first_name: firstNameOf(app.candidate.fullName),
@@ -124,11 +128,27 @@ async function buildMergeContext(applicationId: string, extra?: Partial<MergeCon
     manager_name: manager?.name ?? "",
     manager_label: managerLabel,
     manager_handle: manager?.telegramHandle ?? "",
+    manager_link: managerLink,
     daily_target: ROLE_TARGETS[app.role.key]?.label ?? "",
     pay_line: ROLE_PAY[app.role.key] ?? "",
     group_invite_url: groupInvite || app.role.trainingGroupUrl || "",
     ...extra,
   };
+}
+
+/**
+ * Surface an outbound message that did NOT actually reach the candidate. A
+ * "failed" send (blocked bot, rate limit, bad chat id) or — in production, where
+ * a bot token IS configured — a "simulated" send (candidate never bound their
+ * Telegram) otherwise vanishes into a DB field no one watches. Fire an ops alert
+ * so a human notices instead of the candidate silently going dark.
+ */
+async function alertUndelivered(status: string, who: string, label: string) {
+  const undelivered = status === "failed" || (status === "simulated" && telegramConfigured());
+  if (!undelivered) return;
+  await sendOpsAlert(`⚠ "${label}" message NOT delivered to ${who} (${status}). They may be stuck — reach out.`).catch(
+    () => {}
+  );
 }
 
 /** Render + send a templated message to the candidate, recording it. */
@@ -176,6 +196,7 @@ export async function sendTemplatedMessage(
       meta: result.detail ? JSON.stringify({ detail: result.detail }) : null,
     },
   });
+  await alertUndelivered(result.status, `${app.candidate.fullName} (${category})`, category);
   return { skipped: false as const, message, sendStatus: result.status };
 }
 
@@ -199,6 +220,7 @@ export async function sendFirstTouch(candidateId: string) {
       status: result.status,
     },
   });
+  await alertUndelivered(result.status, `${candidate.fullName} (first_touch)`, "first_touch");
   return { skipped: false as const, message };
 }
 
