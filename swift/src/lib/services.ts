@@ -316,7 +316,19 @@ export async function moveStage(applicationId: string, to: Stage, actorUserId?: 
   return { from, to, effects };
 }
 
-/** Turn a hired candidate into a User and assign them to a model (auto-balanced). */
+/** A Prisma unique-constraint violation (P2002) — a lost concurrency race. */
+const isUniqueViolation = (e: any) => e?.code === "P2002";
+
+/**
+ * Turn a hired candidate into a User and assign them to a model (auto-balanced).
+ *
+ * Race-safe: two near-simultaneous hires for the same person (a Telegram retry
+ * or a double-tapped SUBMIT) can both pass the "already assigned?" read before
+ * either writes. The DB now backs that check with a partial unique index on
+ * active (userId, roleId), so the loser's create throws P2002 — which we catch
+ * and resolve to the winner's hire instead of creating a duplicate or firing a
+ * false "assign manually" alert.
+ */
 export async function onboardHire(applicationId: string) {
   const app = await prisma.application.findUnique({
     where: { id: applicationId },
@@ -324,36 +336,57 @@ export async function onboardHire(applicationId: string) {
   });
   if (!app) throw new Error("application not found");
 
-  // Reuse an existing User for this candidate, or create one.
+  // Reuse an existing User for this candidate, or create one — race-safe on the
+  // User.candidateId unique constraint.
   let user = await prisma.user.findFirst({ where: { candidateId: app.candidateId } });
   if (!user) {
-    user = await prisma.user.create({
-      data: {
-        name: app.candidate.fullName,
-        role: "va",
-        telegramHandle: app.candidate.telegramHandle,
-        email: app.candidate.email,
-        candidateId: app.candidateId,
-        status: "active",
-      },
-    });
+    try {
+      user = await prisma.user.create({
+        data: {
+          name: app.candidate.fullName,
+          role: "va",
+          telegramHandle: app.candidate.telegramHandle,
+          email: app.candidate.email,
+          candidateId: app.candidateId,
+          status: "active",
+        },
+      });
+    } catch (e) {
+      if (!isUniqueViolation(e)) throw e;
+      user = await prisma.user.findFirst({ where: { candidateId: app.candidateId } });
+    }
   }
-  // Avoid duplicate assignment.
-  const existing = await prisma.assignment.findFirst({
-    where: { userId: user.id, roleId: app.roleId, status: { in: ["probation", "active"] } },
-  });
+  if (!user) throw new Error("could not resolve user for candidate");
+
+  // Already assigned for this role? Reuse it (the common idempotent path).
+  const activeWhere = { userId: user.id, roleId: app.roleId, status: { in: ["probation", "active"] } };
+  const existing = await prisma.assignment.findFirst({ where: activeWhere });
   if (existing) {
     const creator = await prisma.creator.findUnique({ where: { id: existing.creatorId } });
     return { userId: user.id, assignmentId: existing.id, creatorName: creator?.name };
   }
-  const assignment = await assignVa({
-    userId: user.id,
-    roleId: app.roleId,
-    managerUserId: app.role.managerUserId,
-  });
-  const creator = await prisma.creator.findUnique({ where: { id: assignment.creatorId } });
-  await auditLog("hired", "User", user.id, { applicationId, creator: creator?.name });
-  return { userId: user.id, assignmentId: assignment.id, creatorName: creator?.name };
+
+  // Create the assignment. If a concurrent hire beat us, the partial unique
+  // index throws P2002 — resolve to their assignment instead of duplicating.
+  try {
+    const assignment = await assignVa({
+      userId: user.id,
+      roleId: app.roleId,
+      managerUserId: app.role.managerUserId,
+    });
+    const creator = await prisma.creator.findUnique({ where: { id: assignment.creatorId } });
+    await auditLog("hired", "User", user.id, { applicationId, creator: creator?.name });
+    return { userId: user.id, assignmentId: assignment.id, creatorName: creator?.name };
+  } catch (e) {
+    if (!isUniqueViolation(e)) throw e;
+    const won = await prisma.assignment.findFirst({ where: activeWhere });
+    if (won) {
+      const creator = await prisma.creator.findUnique({ where: { id: won.creatorId } });
+      await auditLog("hire_dedup", "User", user.id, { applicationId, note: "concurrent hire resolved to existing assignment" });
+      return { userId: user.id, assignmentId: won.id, creatorName: creator?.name };
+    }
+    throw e;
+  }
 }
 
 // ── Trial submission ─────────────────────────────────────────────────────────
