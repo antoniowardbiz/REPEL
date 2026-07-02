@@ -284,6 +284,12 @@ model Assignment {
   user    User    @relation("UserAssignments", fields: [userId], references: [id])
   creator Creator @relation(fields: [creatorId], references: [id])
   role    Role    @relation(fields: [roleId], references: [id])
+
+  // NOTE: a PARTIAL unique index on (userId, roleId) WHERE status IN
+  // ('probation','active') is enforced via migration
+  // 20260702110000_assignment_unique_active (SQLite partial indexes can't be
+  // expressed in the Prisma schema). It blocks duplicate ACTIVE assignments
+  // while still allowing re-assignment after an old one has 'ended'.
 }
 
 // A Telegram group that acts as a "folder" (Bot API can't manage real chat
