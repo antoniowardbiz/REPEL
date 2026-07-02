@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { getTrainingByToken } from "@/lib/training";
 import Quiz from "@/components/Quiz";
+import { winsForRole, PAYOUT_STATS, WINS_CHANNEL_HANDLE, WINS_CHANNEL_URL } from "@/lib/testimonials-config";
 
 export const dynamic = "force-dynamic";
 
@@ -90,6 +91,18 @@ const TRIAL_CSS = `
   border-radius:9px;padding:12px 22px;cursor:pointer;transition:.2s ease}
 #trial .r-cta:hover{transform:translateY(-1px);border-color:var(--red);color:#fff}
 #trial .msgcard{margin-top:20px;border:1px solid var(--line);background:var(--surface);border-radius:12px;padding:24px;color:var(--ink-dim);font-size:15px}
+#trial .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+#trial .stat{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 10px;text-align:center}
+#trial .stat b{display:block;font-family:var(--display);font-weight:400;font-size:24px;color:var(--red);letter-spacing:.5px}
+#trial .stat span{display:block;margin-top:5px;font-family:var(--mono);font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-faint)}
+#trial .winrow{display:flex;align-items:center;justify-content:space-between;gap:12px;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px 15px;margin-top:8px}
+#trial .winrow .who{font-size:14px;color:var(--ink)}
+#trial .winrow .who em{font-style:normal;color:var(--ink-faint)}
+#trial .winrow .amt{font-family:var(--display);font-size:22px;color:var(--red);white-space:nowrap}
+#trial .winrow .per{font-family:var(--mono);font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-faint);text-align:right}
+#trial .winlink{display:flex;align-items:center;justify-content:center;gap:8px;margin-top:12px;border:1px solid var(--line-strong);border-radius:9px;padding:11px;font-family:var(--mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-dim);text-decoration:none;transition:.2s ease}
+#trial .winlink:hover{border-color:var(--red);color:#fff}
+@media (max-width:520px){#trial .stats{grid-template-columns:1fr 1fr}}
 #trial footer{padding-top:34px;text-align:center;font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-faint)}
 #trial footer i{color:var(--red);font-style:normal}
 @keyframes trial-rise{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
@@ -202,6 +215,36 @@ export default async function TrainingPage({ params }: { params: { token: string
           fastest path to getting hired and earning. Pass the gate below to unlock your trial.
         </p>
       </div>
+
+      {/* Payout proof — motivation before the playbook */}
+      <section>
+        <div className="eyebrow">
+          <i>»</i>Team wins — real payouts
+        </div>
+        <div className="stats">
+          {PAYOUT_STATS.map((s) => (
+            <div className="stat" key={s.label}>
+              <b>{s.value}</b>
+              <span>{s.label}</span>
+            </div>
+          ))}
+        </div>
+        {winsForRole(role).map((w, i) => (
+          <div className="winrow" key={i}>
+            <div className="who">
+              {w.handle} <em>· {w.role}</em>
+              {w.note && <div style={{ fontSize: 12, color: "var(--ink-dim)", marginTop: 2 }}>{w.note}</div>}
+            </div>
+            <div>
+              <div className="amt">{w.amount}</div>
+              <div className="per">{w.period}</div>
+            </div>
+          </div>
+        ))}
+        <a className="winlink" href={WINS_CHANNEL_URL} target="_blank" rel="noopener">
+          See live payouts → {WINS_CHANNEL_HANDLE}
+        </a>
+      </section>
 
       <section>
         <div className="eyebrow">
