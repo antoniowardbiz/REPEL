@@ -6,12 +6,14 @@ import { useRouter } from "next/navigation";
 export type ModelRow = {
   id: string;
   name: string;
-  contentDriveUrl: string;
   xMainUrl: string;
+  driveX: string; // x_va content drive
+  driveReddit: string; // reddit_va content drive
 };
 
-// Live editor for each model's links. These flow straight into trial briefs,
-// the onboarding welcome, and the AI support agent — no deploy needed.
+// Live editor for each model's links — one drive per role per model (Lola×X,
+// Lola×Reddit, Lae×X, Lae×Reddit) plus the main page. Feeds trial briefs, the
+// onboarding welcome and the AI support agent instantly; no deploy needed.
 export default function ModelLinksEditor({ models }: { models: ModelRow[] }) {
   return (
     <div className="space-y-3">
@@ -25,13 +27,15 @@ export default function ModelLinksEditor({ models }: { models: ModelRow[] }) {
 
 function Row({ model }: { model: ModelRow }) {
   const router = useRouter();
-  const [drive, setDrive] = useState(model.contentDriveUrl);
+  const [driveX, setDriveX] = useState(model.driveX);
+  const [driveReddit, setDriveReddit] = useState(model.driveReddit);
   const [main, setMain] = useState(model.xMainUrl);
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const dirty = drive !== model.contentDriveUrl || main !== model.xMainUrl;
+  const dirty =
+    driveX !== model.driveX || driveReddit !== model.driveReddit || main !== model.xMainUrl;
 
   async function save() {
     setBusy(true);
@@ -40,7 +44,10 @@ function Row({ model }: { model: ModelRow }) {
       const res = await fetch(`/api/creators/${model.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ contentDriveUrl: drive, xMainUrl: main }),
+        body: JSON.stringify({
+          xMainUrl: main,
+          drives: { x_va: driveX, reddit_va: driveReddit },
+        }),
       });
       const j = await res.json().catch(() => ({}));
       if (res.ok) {
@@ -63,14 +70,23 @@ function Row({ model }: { model: ModelRow }) {
           {busy ? "…" : saved ? "Saved ✓" : "Save"}
         </button>
       </div>
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
         <div>
-          <label className="label">Content drive (what VAs post from)</label>
+          <label className="label">X content drive</label>
           <input
             className="input"
             placeholder="https://drive.google.com/…"
-            value={drive}
-            onChange={(e) => setDrive(e.target.value)}
+            value={driveX}
+            onChange={(e) => setDriveX(e.target.value)}
+          />
+        </div>
+        <div>
+          <label className="label">Reddit content drive</label>
+          <input
+            className="input"
+            placeholder="https://drive.google.com/…"
+            value={driveReddit}
+            onChange={(e) => setDriveReddit(e.target.value)}
           />
         </div>
         <div>
@@ -83,9 +99,10 @@ function Row({ model }: { model: ModelRow }) {
           />
         </div>
       </div>
-      {!drive && (
+      {(!driveX || !driveReddit) && (
         <p className="mt-2 text-xs text-warn">
-          ⚠ No content drive set — trial briefs for this model can&apos;t tell VAs what to post.
+          ⚠ {!driveX && !driveReddit ? "No drives set" : !driveX ? "No X drive set" : "No Reddit drive set"} — VAs
+          on that role can&apos;t be told what content to post.
         </p>
       )}
       {error && <p className="mt-2 text-xs text-bad">⚠ {error}</p>}

@@ -29,7 +29,8 @@ model Creator {
   xMainUrl        String?
   igHandle        String?
   tiktokHandle    String?
-  contentDriveUrl String?
+  contentDriveUrl String? // general/fallback drive
+  contentDrives   String? // JSON {roleKey: driveUrl} — per-role drives (e.g. x_va vs reddit_va content)
   active          Boolean  @default(true)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt

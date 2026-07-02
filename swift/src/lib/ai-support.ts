@@ -45,6 +45,14 @@ async function buildSupportContext(candidateId: string): Promise<string | null> 
     include: { creator: true },
   });
   const creator = assignment?.creator ?? app.role.defaultCreator;
+  // Per-role drive when set, falling back to the model's general drive.
+  let drive = creator?.contentDriveUrl || "";
+  try {
+    const drives = creator?.contentDrives ? JSON.parse(creator.contentDrives) : {};
+    if (drives?.[app.role.key]) drive = drives[app.role.key];
+  } catch {
+    /* keep fallback */
+  }
   const trial = app.trials[0] ?? null;
   const dl = trial?.deadlineAt && trial.status === "active" ? deadlineLabel(trial.deadlineAt) : null;
   const training = app.role.trainingModule?.content?.slice(0, 2500) ?? "";
@@ -59,8 +67,8 @@ ${trial ? `Trial status: ${trial.status}${dl ? ` — ${dl.text}` : ""}` : "Trial
 THEIR MODEL (the creator they work for)
 Model name: ${creator?.name ?? "not assigned yet — assigned automatically when hired"}
 Model main page: ${creator?.xMainUrl || "n/a"}
-Content drive (what they post FROM): ${creator?.contentDriveUrl || "not set — escalate if asked"}
-Manager: ${app.role.manager?.name || "the operator"}
+Content drive (what they post FROM): ${drive || "not set — escalate if asked"}
+Manager: ${app.role.manager ? `${app.role.manager.name}${app.role.manager.telegramHandle ? ` (${app.role.manager.telegramHandle})` : ""}` : "the operator"}
 
 TERMS
 Pay: ${ROLE_PAY[app.role.key] || "confirmed by the manager at onboarding"}

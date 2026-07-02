@@ -91,16 +91,33 @@ async function buildMergeContext(applicationId: string, extra?: Partial<MergeCon
     groupInvite = grp?.inviteUrl ?? "";
   }
 
+  // Per-role drive when set (Lola's X folder ≠ Lola's Reddit folder), falling
+  // back to the model's general drive.
+  let drive = creator?.contentDriveUrl ?? "";
+  try {
+    const drives = creator?.contentDrives ? JSON.parse(creator.contentDrives) : {};
+    if (drives?.[app.role.key]) drive = drives[app.role.key];
+  } catch {
+    /* keep fallback */
+  }
+
+  const manager = app.role.manager;
+  const managerLabel = manager
+    ? manager.telegramHandle
+      ? `${manager.name} (${manager.telegramHandle})`
+      : manager.name
+    : "";
+
   return {
     first_name: firstNameOf(app.candidate.fullName),
     model_name: creator?.name ?? "the model",
     model_main_url: creator?.xMainUrl ?? "",
-    content_drive_url: creator?.contentDriveUrl ?? "",
+    content_drive_url: drive,
     training_group_url: app.role.trainingGroupUrl ?? "",
     training_url: trainingLink(app.candidate.startToken),
     trial_hours: app.role.trialHours,
     role_name: app.role.displayName,
-    manager_name: app.role.manager?.name ?? "",
+    manager_name: managerLabel,
     daily_target: ROLE_TARGETS[app.role.key]?.label ?? "",
     pay_line: ROLE_PAY[app.role.key] ?? "",
     group_invite_url: groupInvite || app.role.trainingGroupUrl || "",
@@ -407,7 +424,12 @@ export async function submitTrial(
       await sendTemplatedMessage(applicationId, "onboarding");
       await auditLog("auto_hired", "Application", applicationId, { reason: "mass_hire_on_submit" }, actorUserId);
       const cand = await prisma.candidate.findUnique({ where: { id: app.candidateId } });
-      await sendOpsAlert(`✅ Auto-hired ${cand?.fullName ?? app.candidateId} (${app.roleId}) on trial submission.`);
+      const roleFull = await prisma.role.findUnique({ where: { id: app.roleId }, include: { manager: true } });
+      const mgr = roleFull?.manager;
+      await sendOpsAlert(
+        `✅ Auto-hired ${cand?.fullName ?? app.candidateId} — ${roleFull?.displayName ?? "VA"}` +
+          (mgr ? ` → hand off to ${mgr.name}${mgr.telegramHandle ? ` (${mgr.telegramHandle})` : ""}` : "")
+      );
     } catch (e: any) {
       await sendOpsAlert(
         `⚠ Auto-hire hit a snag for application ${applicationId} (${e?.message ?? "unknown"}). They submitted — finish onboarding manually.`
