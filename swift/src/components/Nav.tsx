@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 
 const links = [
   { href: "/", label: "Pipeline" },
+  { href: "/conversations", label: "Conversations" },
   { href: "/scoring", label: "Scorer Queue" },
   { href: "/vas", label: "VAs & Models" },
   { href: "/folders", label: "Folders" },
@@ -15,7 +16,7 @@ const links = [
 ];
 
 // Applicant-facing routes render their own standalone skin — no operator nav.
-const HIDE_ON = ["/apply", "/training"];
+const HIDE_ON = ["/apply", "/training", "/playbook"];
 
 export default function Nav() {
   const pathname = usePathname() || "/";
