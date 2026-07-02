@@ -109,7 +109,7 @@ export const ROLE_PLATFORM: Record<string, "x" | "instagram" | "reddit" | "tikto
 
 // postsPerDay = the trial's daily output target; window is the role's trial_hours.
 export const ROLE_TARGETS: Record<string, { postsPerDay: number; label: string }> = {
-  x_va: { postsPerDay: 8, label: "multiple posts/day + viral-reply targeting" },
+  x_va: { postsPerDay: 6, label: "6 feed posts/day + replies under fresh viral posts" },
   tiktok_va: { postsPerDay: 3, label: "3 reels/slideshows a day" },
   ig_manager: { postsPerDay: 3, label: "3 reels/day + 1 story" },
   ig_dm_handler: { postsPerDay: 1, label: "DMs worked once/day" },
@@ -516,14 +516,13 @@ Which one is your strong point — and WHY?`,
     roleKey: null,
     category: "training",
     subject: "Training before your trial",
-    body: `🔥 Great choice, {{first_name}} — {{role_name}} is one of our highest-earning roles, and we take it seriously. So should you.
+    body: `Hi {{first_name}} — thanks for applying for {{role_name}} 🙌
 
-Here's the deal: pass a short training + quiz, then a paid trial. The people who treat this like a real career are the ones earning the most.
+Step 1 is simple: go through the training below and answer the quiz. Pass it and we move straight to step 2.
 
-📚 Step 1 — read your training top to bottom (this is exactly what "great" looks like), then complete the quiz at the end:
-{{training_url}}
+This is a very good role — please take it seriously.
 
-Pass it and I'll unlock your trial automatically. Let's go 🚀`,
+📚 Training + quiz: {{training_url}}`,
   },
   {
     key: "brief_x_va",

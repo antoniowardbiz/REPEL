@@ -16,47 +16,51 @@ export type TrainingModuleConfig = {
   questions: QuizQuestion[];
 };
 
-// Shared safety rules every VA must internalize before a trial.
-const SAFETY = `## Account safety (applies to every role)
-- Never post nudity or explicit content on a SFW platform (X SFW, TikTok, Instagram, Reddit SFW subs). One violation can ban the account — that is an automatic fail.
-- Use only the trial account we give you. Never log into it from a flagged device, never change the password, email, or 2FA.
-- Space your activity out naturally. Dumping 20 posts in 10 minutes looks like a bot and gets accounts limited.
-- If anything looks risky (a shadowban, a warning, a takedown), stop and message the operator — do not push through it.`;
+// Shared safety rules every VA must internalize before a trial. Plain text —
+// the training page renders content verbatim, so no markdown markers here.
+const SAFETY = `ACCOUNT SAFETY — applies to every role
+• Never post nudity or explicit content on a SFW platform (X SFW, TikTok, Instagram, Reddit SFW subs). One violation can ban the account — that is an automatic fail.
+• Use only the trial account we give you. Never log into it from a flagged device, never change the password, email, or 2FA.
+• Space your activity out naturally. Dumping 20 posts in 10 minutes looks like a bot and gets accounts limited.
+• If anything looks risky (a shadowban, a warning, a takedown), stop and message the operator — do not push through it.`;
 
 export const TRAINING_MODULES: Record<string, TrainingModuleConfig> = {
   x_va: {
     title: "X (Twitter) VA — Trial Training",
     passPct: 80,
-    content: `# X VA trial
-Your job is to grow and warm the model's X presence with on-brand replies and
-reposts that drive attention back to the main account — without getting the
-account limited.
+    content: `X VA TRIAL
+Your job is to grow the model's X presence and drive attention back to her main
+account — without getting the account limited.
 
-## What a great trial looks like
-- Reply under larger accounts in the niche with short, witty, on-brand hooks.
-- Keep a natural cadence (a handful of quality replies per hour, not a burst).
-- Every action points attention back toward the model's main — no random spam.
-- Match the model's voice: flirty-but-SFW, confident, never crude on a SFW account.
+THE DAILY TARGET
+• 6 posts to the main page every day, spread naturally across the day.
+• PLUS multiple replies placed under posts that went viral in the last 24 hours — short, witty, on-brand hooks.
+
+WHAT GREAT LOOKS LIKE
+• Every post is quality: a strong photo with an engaging, on-persona caption — varied, never copy-paste.
+• Replies land under big, fresh viral posts where the eyeballs are.
+• Everything points attention back to the model's main account.
+• Match the model's voice: flirty-but-SFW, confident, never crude on a SFW account.
 
 ${SAFETY}`,
     questions: [
       {
-        prompt: "You have 30 replies to make during the trial. What's the best approach?",
+        prompt: "How many times should you post each day in total?",
         options: [
-          "Post all 30 in the first 15 minutes to hit the number fast",
-          "Spread them out naturally over the window with quality hooks",
-          "Copy-paste the same reply under every post",
+          "6 posts to the main page, plus multiple replies under posts that went viral in the last 24 hours",
+          "1–2 posts whenever you get time",
+          "As many as possible — dump 30+ posts in one burst",
         ],
-        answer: 1,
+        answer: 0,
       },
       {
-        prompt: "The trial account is on SFW X. Someone asks for explicit content. You:",
+        prompt: "What makes a post good enough to publish?",
         options: [
-          "Post explicit content to convert them",
-          "Keep it SFW and steer attention to the model's main",
-          "Ignore the platform rules since it's just a trial",
+          "A strong photo with an engaging, on-persona caption — varied, never copy-paste",
+          "Any photo with a one-word caption — volume is all that matters",
+          "The exact same caption reused on every post to save time",
         ],
-        answer: 1,
+        answer: 0,
       },
       {
         prompt: "You notice the account may be shadowbanned mid-trial. You should:",
@@ -294,17 +298,25 @@ ${SAFETY}`,
   reddit_va: {
     title: "Reddit VA — Trial Training",
     passPct: 80,
-    content: `# Reddit VA trial
-You'll post the model's content into the right subreddits, respecting each sub's
-rules, verification, and karma requirements to avoid removals and bans.
+    content: `PLEASE READ THIS — IMPORTANT INFO TO SECURE YOUR JOB
 
-## What a great trial looks like
-- Posts land in subs where they fit, with titles that follow each sub's rules.
-- You respect verification, karma, and cooldown requirements per sub.
-- Natural spacing across subs — not the same post spammed everywhere at once.
-- Removals are minimized; a banned account is an automatic fail.
+This is a good-paying job if you perform, and there is massive room for growth.
 
-${SAFETY}`,
+💰 Pay: $2/hour · 4 hours a day · PLUS 10% commission on all spend from the subs that come from your link.
+Many of our Reddit VAs are making upwards of $500 a week.
+
+You will be under a manager. We prefer people who come with accounts ready — but if you don't have one, you will be trained and set up with an account.
+
+THE JOB
+Post the model's content into the right subreddits, following each sub's rules, verification and karma requirements — no removals, no bans.
+
+NON-NEGOTIABLES
+• A banned account is an automatic fail. Account safety comes first, always.
+• Report to your manager every day.
+• Space posts out naturally — never spam the same post everywhere at once.
+• If anything looks risky (shadowban, warning, takedown), stop and message your manager.
+
+Answer these questions so we understand your competency.`,
     questions: [
       {
         prompt: "Before posting to a subreddit you should:",
@@ -316,13 +328,9 @@ ${SAFETY}`,
         answer: 0,
       },
       {
-        prompt: "Many NSFW subs require:",
-        options: [
-          "Nothing — anyone can post",
-          "Verification and/or a minimum karma before posting",
-          "A paid subscription to Reddit",
-        ],
-        answer: 1,
+        prompt: "Should you report to your manager each day?",
+        options: ["Yes", "No"],
+        answer: 0,
       },
       {
         prompt: "To avoid removals and bans you should:",
@@ -337,7 +345,7 @@ ${SAFETY}`,
         prompt: "Getting the trial account banned is:",
         options: [
           "No big deal, we'll make another",
-          "An automatic fail",
+          "An automatic fail — the most serious mistake you can make",
           "A sign you're posting enough",
         ],
         answer: 1,
