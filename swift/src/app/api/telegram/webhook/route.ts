@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { submitTrial, deliverStageMessage, routeToManagerForAccount } from "@/lib/services";
+import { submitTrial, deliverStageMessage, routeToManagerForAccount, selectRole } from "@/lib/services";
 import { sendOpsAlert, sendTelegramMessage } from "@/lib/telegram";
 import { ROLE_PLATFORM } from "@/lib/roles-config";
 import { handleCandidateMessage } from "@/lib/ai-support";
@@ -208,6 +208,38 @@ export async function POST(req: Request) {
           "Just reply YES if you have a Reddit account to use, or NO if you need one set up 🙂"
         );
         handled = true;
+      }
+    }
+
+    // ── Role selection: candidate replying to "which role + why?" (no app yet)
+    // Closes the dead-end where someone who picked "not sure yet" (or landed
+    // role-less) answers the first-touch question and is ignored forever.
+    if (!handled && text) {
+      const hasApp = await prisma.application.findFirst({ where: { candidateId: candidate.id } });
+      if (!hasApp) {
+        const wantsReddit = /\breddit\b/i.test(text);
+        const wantsX = /\b(x|twitter|tweet)\b/i.test(text);
+        let roleKey: string | null = null;
+        if (wantsReddit && !wantsX) roleKey = "reddit_va";
+        else if (wantsX && !wantsReddit) roleKey = "x_va";
+        if (roleKey) {
+          await selectRole(candidate.id, roleKey, text); // creates the application + fires training
+          handled = true;
+        } else {
+          const ask = "Which is your strong point — reply X (Twitter) or Reddit and I'll get you started 🙂";
+          const r = await sendTelegramMessage(chatId, ask);
+          await prisma.message.create({
+            data: {
+              candidateId: candidate.id,
+              direction: "outbound",
+              channel: "telegram",
+              templateKey: "role_prompt",
+              body: ask,
+              status: r.status,
+            },
+          });
+          handled = true;
+        }
       }
     }
 
