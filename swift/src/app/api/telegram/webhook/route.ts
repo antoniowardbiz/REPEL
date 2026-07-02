@@ -133,11 +133,34 @@ export async function POST(req: Request) {
 
     if (firstBind) await deliverStageMessage(candidate.id);
 
-    // ── submission during a live trial (intent-gated) ────────────────────────
+    // Pending managed-role account step? While a candidate is still answering
+    // the account question (account_check) or with the manager (with_manager),
+    // a posted link is NOT a trial submission — the account must be set up +
+    // warmed first. Without this, "YES, it's reddit.com/u/me" would instant-hire
+    // a cold account, the exact thing the manager step exists to prevent.
+    const accountGate = text
+      ? await prisma.trial.findFirst({
+          where: {
+            status: { in: ["account_check", "with_manager"] },
+            application: {
+              candidateId: candidate.id,
+              stage: "TRIAL_READY",
+              role: { managerUserId: { not: null } },
+            },
+          },
+          orderBy: { createdAt: "desc" },
+          include: { application: true },
+        })
+      : null;
+    const atAccountCheck = accountGate?.status === "account_check";
+
+    // ── submission during a live trial (SUBMIT-intent gated) ─────────────────
     const links = text ? Array.from(text.matchAll(URL_RE)).map((m) => m[0]) : [];
     const saidSubmit = text ? SUBMIT_RE.test(text) : false;
     let handled = firstBind; // first-bind already got their stage message
-    if (links.length > 0 || saidSubmit) {
+    // Never treat a message as a submission while they're still on the account
+    // question — that belongs to the YES/NO gate below.
+    if (!atAccountCheck && (links.length > 0 || saidSubmit)) {
       const app = await prisma.application.findFirst({
         where: { candidateId: candidate.id, stage: { in: ["TRIAL_READY", "TRIAL_ACTIVE"] } },
         orderBy: { stageChangedAt: "desc" },
@@ -146,68 +169,74 @@ export async function POST(req: Request) {
       if (app) {
         const platform = ROLE_PLATFORM[app.role.key];
         const onPlatform = links.some((u) => linkOnPlatform(u, platform));
-        // Real submission only on clear intent: a link on the role's own
-        // platform, OR an explicit "submit/done" that includes a link. A stray
-        // off-platform link (portfolio, progress pic, signature) is just history.
-        if (onPlatform || (saidSubmit && links.length > 0)) {
+        // A hire now requires EXPLICIT intent (the word SUBMIT + a link) — the
+        // brief tells them to. A bare on-platform link no longer auto-hires (that
+        // used to hire an X VA who merely shared a viral link, or a Reddit VA who
+        // pasted their profile). We ask them to confirm instead.
+        if (saidSubmit && links.length > 0) {
           await submitTrial(app.id, links);
           handled = true;
         } else if (saidSubmit && links.length === 0) {
-          // Said "done" but attached no link — nudge, don't submit.
+          await sendTelegramMessage(chatId, "Almost! Reply with the link to your trial post to submit it ✅");
+          handled = true;
+        } else if (onPlatform) {
+          // On-platform link, no SUBMIT word — confirm intent rather than hiring.
           await sendTelegramMessage(
             chatId,
-            "Almost! Reply with the link to your trial post to submit it ✅"
+            "Got your link! If that's your finished trial post, reply with the word SUBMIT and the link to send it in ✅"
           );
           handled = true;
         }
-        // else: off-platform link, no submit intent — recorded as history only.
+        // else: off-platform link, no intent — recorded as history only.
       }
     }
 
     // ── Account check: candidate answering the YES/NO account question ───────
-    // Find the pending account-check trial for this candidate on a managed role
-    // DIRECTLY (not "latest app then look for the trial") so it can't be missed
-    // when the candidate has more than one application. This is what catches the
-    // YES/NO before it falls through to the AI agent.
-    if (!handled && text) {
-      const gateTrial = await prisma.trial.findFirst({
-        where: {
-          status: "account_check",
-          application: {
-            candidateId: candidate.id,
-            stage: "TRIAL_READY",
-            role: { managerUserId: { not: null } },
-          },
-        },
-        orderBy: { createdAt: "desc" },
-        include: { application: true },
-      });
-      if (gateTrial) {
-        // Both answers hand off to the manager — she assesses the account and
-        // assigns the path (posting vs warm-up). Check NO first: "i don't have
-        // one" contains "have one", so a negative must beat the affirmative.
-        if (NO_RE.test(text)) {
-          await routeToManagerForAccount(gateTrial.applicationId, false); // no account → set up + warm
-          handled = true;
-        } else if (YES_RE.test(text)) {
-          await routeToManagerForAccount(gateTrial.applicationId, true); // has account → assess & start
-          handled = true;
-        } else {
-          await sendTelegramMessage(
-            chatId,
-            "Just reply YES if you have a Reddit account to use, or NO if you need one set up 🙂"
-          );
-          handled = true;
-        }
+    if (!handled && text && atAccountCheck && accountGate) {
+      // Both answers hand off to the manager — she assesses the account and
+      // assigns the path (posting vs warm-up). Check NO first: "i don't have
+      // one" contains "have one", so a negative must beat the affirmative.
+      if (NO_RE.test(text)) {
+        await routeToManagerForAccount(accountGate.applicationId, false); // no account → set up + warm
+        handled = true;
+      } else if (YES_RE.test(text)) {
+        await routeToManagerForAccount(accountGate.applicationId, true); // has account → assess & start
+        handled = true;
+      } else {
+        await sendTelegramMessage(
+          chatId,
+          "Just reply YES if you have a Reddit account to use, or NO if you need one set up 🙂"
+        );
+        handled = true;
       }
     }
 
     // ── AI support: answer everything else, 24/7 ─────────────────────────────
     // Whatever wasn't a deep link, a submission, an account answer, or a nudge
     // gets the support agent: it answers from the candidate's real context or
-    // escalates to ops. Fully skipped when ANTHROPIC_API_KEY is unset.
+    // escalates to ops.
     if (!handled && text && text.trim().length > 0) {
-      await handleCandidateMessage(candidate.id, chatId, text);
+      const outcome = await handleCandidateMessage(candidate.id, chatId, text);
+      // Never leave a candidate in silence when the AI couldn't run (key unset,
+      // over the daily cap, or errored). Send a human-handoff line and alert ops
+      // so someone actually replies.
+      if (outcome.action === "off" || outcome.action === "capped" || outcome.action === "error") {
+        const fallback = "Thanks for your message 🙏 A team member will get back to you shortly.";
+        const r = await sendTelegramMessage(chatId, fallback);
+        await prisma.message.create({
+          data: {
+            candidateId: candidate.id,
+            direction: "outbound",
+            channel: "telegram",
+            templateKey: "human_fallback",
+            body: fallback,
+            status: r.status,
+          },
+        });
+        await sendOpsAlert(
+          `🙋 Candidate needs a human (AI ${outcome.action}) — ${username ?? chatId}: "${(text ?? "").slice(0, 160)}"`
+        );
+      }
     }
   } catch (e) {
     console.error("telegram webhook error:", e);
