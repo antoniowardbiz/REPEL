@@ -58,6 +58,27 @@ async function buildSupportContext(candidateId: string): Promise<string | null> 
   const training = app.role.trainingModule?.content?.slice(0, 2500) ?? "";
   const base = (process.env.NEXT_PUBLIC_BASE_URL || "").replace(/\/$/, "");
 
+  // Managed roles (e.g. Reddit → Haria) run through the manager, not a self-serve
+  // brief. Give the agent the RIGHT next step so it points people to their
+  // manager instead of promising an auto-brief that never comes.
+  const manager = app.role.manager;
+  const managed = Boolean(app.role.managerUserId && manager);
+  const managerRef = manager
+    ? `${manager.name}${manager.telegramHandle ? ` (${manager.telegramHandle})` : ""}`
+    : "the operator";
+  const isReddit = app.role.key === "reddit_va";
+  const processSteps = managed
+    ? `1. Pass the training quiz on their training page (everyone passes — it only flags weak spots to coach).
+2. Answer the account question here (do they have a usable ${isReddit ? "Reddit " : ""}account?). EITHER answer leads to the SAME next step: they go to their manager ${managerRef}, who checks or sets up and WARMS the account so it never gets banned, then tells them exactly what to post. If they say "what now / nothing's happening / I passed" at this stage, the answer is: message ${managerRef} to get your account sorted.
+3. Once they're posting, send the post link here with the word SUBMIT (${isReddit ? "Reddit" : "platform"} links count automatically).
+4. Submitting = hired: welcome with model, drive, target, pay, group.
+5. After hire: hit the daily target, check in with ${managerRef} daily, keep the account safe (natural pacing, no password changes, stop + report anything risky like a shadowban).`
+    : `1. Pass the training quiz on their training page → trial unlocks automatically.
+2. The trial brief arrives here in Telegram; they do the work on their account.
+3. To SUBMIT: send the link to their work here with the word SUBMIT (X/platform links count automatically).
+4. Submitting = hired: they get a welcome with model, drive, target, pay, group.
+5. After hire: hit the daily target, check in with the manager daily, keep the account safe (no nudity on SFW platforms, no password changes, natural pacing, stop + report anything risky like a shadowban).`;
+
   return `CANDIDATE
 Name: ${candidate.fullName}
 Role: ${app.role.displayName}
@@ -76,11 +97,7 @@ Daily target: ${ROLE_TARGETS[app.role.key]?.label ?? "per the brief"}
 Their personal training page: ${candidate.startToken ? `${base}/training/${candidate.startToken}` : "n/a"}
 
 HOW THE PROCESS WORKS (answer from this)
-1. Pass the training quiz on their training page → trial unlocks automatically.
-2. The trial brief arrives here in Telegram; they do the work on their account.
-3. To SUBMIT: send the link to their work here with the word SUBMIT (Reddit/X links count automatically).
-4. Submitting = hired: they get a welcome with model, drive, target, pay, group.
-5. After hire: hit the daily target, check in with the manager daily, keep the account safe (no nudity on SFW platforms, no password changes, natural pacing, stop + report anything risky like a shadowban).
+${processSteps}
 
 ROLE TRAINING MATERIAL (excerpt)
 ${training}`;

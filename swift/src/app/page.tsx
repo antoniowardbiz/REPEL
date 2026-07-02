@@ -2,6 +2,7 @@ import { prisma } from "@/lib/db";
 import { BOARD_STAGES, Stage, Tier } from "@/lib/constants";
 import { timeAgo, deadlineLabel } from "@/lib/ui";
 import Board, { BoardCard } from "@/components/Board";
+import ClearPipelineButton from "@/components/ClearPipelineButton";
 
 export const dynamic = "force-dynamic";
 
@@ -75,6 +76,7 @@ export default async function PipelinePage() {
             Drag a card to move it — the destination stage fires its automation (send brief, queue scoring…).
           </p>
         </div>
+        <ClearPipelineButton />
       </div>
       <Board cards={cards} roleOptions={roleOptions} />
     </div>
