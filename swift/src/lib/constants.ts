@@ -82,7 +82,14 @@ export const ROLE_KEYS = [
 export type RoleKey = (typeof ROLE_KEYS)[number];
 
 // ── Trial status ─────────────────────────────────────────────────────────────
-export const TRIAL_STATUSES = ["not_started", "active", "submitted", "expired"] as const;
+export const TRIAL_STATUSES = [
+  "not_started",
+  "account_check", // asked if they have an account; awaiting yes/no
+  "with_manager", // handed to the role manager (has account → assess, or none → set up + warm)
+  "active",
+  "submitted",
+  "expired",
+] as const;
 export type TrialStatus = (typeof TRIAL_STATUSES)[number];
 
 // ── Account inventory & access (Phase 3) ─────────────────────────────────────

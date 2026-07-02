@@ -9,7 +9,8 @@ type Result = {
   passPct: number;
   correctCount: number;
   total: number;
-  unlocked: boolean;
+  proceeded: boolean;
+  weakAreas: string[];
   answerKey: number[];
 };
 
@@ -61,13 +62,6 @@ export default function Quiz({
     } finally {
       setBusy(false);
     }
-  }
-
-  function retake() {
-    setResult(null);
-    setAnswers({});
-    setError(null);
-    if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   function optClass(qi: number, oi: number): string {
@@ -127,25 +121,28 @@ export default function Quiz({
       )}
 
       {graded && (
-        <div className={`result ${result!.passed ? "pass" : ""}`}>
+        <div className="result pass">
           <div className="r-chev">»»»</div>
-          <div className="r-status">{result!.passed ? "Trial Unlocked" : "Not Yet"}</div>
+          <div className="r-status">You&apos;re Through</div>
           <div className="r-score">
             <b>
               {result!.correctCount} / {result!.total} correct
             </b>{" "}
-            · {result!.score}% · pass mark {result!.passPct}%
+            · {result!.score}%
           </div>
           <div className="r-msg">
             {result!.passed
-              ? "Clean pass. Your trial is unlocked — check your Telegram for the brief and your task."
-              : "Review the playbook above and retake. The bar is high because a single account mistake ends a trial."}
+              ? "Clean pass 🔥 You're unlocked — check your Telegram for the next step."
+              : "You're unlocked ✅ — check your Telegram for the next step. Your manager will brush up a couple of areas with you (marked below)."}
           </div>
-          {!result!.passed && (
-            <div>
-              <button className="r-cta" onClick={retake}>
-                Review &amp; retake
-              </button>
+          {result!.weakAreas.length > 0 && (
+            <div className="r-weak">
+              <div className="r-weak-h">Worth reviewing:</div>
+              <ul>
+                {result!.weakAreas.map((w, i) => (
+                  <li key={i}>{w}</li>
+                ))}
+              </ul>
             </div>
           )}
         </div>

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { submitTrial, deliverStageMessage } from "@/lib/services";
+import { submitTrial, deliverStageMessage, routeToManagerForAccount } from "@/lib/services";
 import { sendOpsAlert, sendTelegramMessage } from "@/lib/telegram";
 import { ROLE_PLATFORM } from "@/lib/roles-config";
 import { handleCandidateMessage } from "@/lib/ai-support";
@@ -20,6 +20,9 @@ import { handleCandidateMessage } from "@/lib/ai-support";
 
 const URL_RE = /\bhttps?:\/\/[^\s]+/gi;
 const SUBMIT_RE = /\b(submit|submitted|done|finished|complete[d]?)\b/i;
+// Account-check answers (has an account to use, or needs one set up).
+const YES_RE = /\b(yes|yep|yeah|yup|ya|i do|i have|have one|got one|got it|ready|affirmative|sure)\b/i;
+const NO_RE = /\b(no|nope|nah|don'?t|do not|haven'?t|need (?:one|an account|setup|set up)|not yet|new account)\b/i;
 const ok = () => NextResponse.json({ ok: true });
 
 // Which hostnames count as "on the role's platform" for a real submission.
@@ -147,10 +150,38 @@ export async function POST(req: Request) {
       }
     }
 
+    // ── Account check: candidate answering the YES/NO account question ───────
+    if (!handled && text) {
+      const app = await prisma.application.findFirst({
+        where: { candidateId: candidate.id, stage: "TRIAL_READY" },
+        orderBy: { stageChangedAt: "desc" },
+        include: { role: true, trials: true },
+      });
+      const gate = app?.trials.find((t) => t.status === "account_check");
+      if (app && gate && app.role.managerUserId) {
+        // Both answers hand off to the manager — she assesses the account and
+        // assigns the path (posting vs warm-up). Check NO first: "i don't have
+        // one" contains "have one", so a negative must beat the affirmative.
+        if (NO_RE.test(text)) {
+          await routeToManagerForAccount(app.id, false); // no account → set up + warm
+          handled = true;
+        } else if (YES_RE.test(text)) {
+          await routeToManagerForAccount(app.id, true); // has account → assess & start
+          handled = true;
+        } else {
+          await sendTelegramMessage(
+            chatId,
+            "Just reply YES if you have a Reddit account to use, or NO if you need one set up 🙂"
+          );
+          handled = true;
+        }
+      }
+    }
+
     // ── AI support: answer everything else, 24/7 ─────────────────────────────
-    // Whatever wasn't a deep link, a submission, or a nudge gets the support
-    // agent: it answers from the candidate's real context or escalates to ops.
-    // Fully skipped when ANTHROPIC_API_KEY is unset.
+    // Whatever wasn't a deep link, a submission, an account answer, or a nudge
+    // gets the support agent: it answers from the candidate's real context or
+    // escalates to ops. Fully skipped when ANTHROPIC_API_KEY is unset.
     if (!handled && text && text.trim().length > 0) {
       await handleCandidateMessage(candidate.id, chatId, text);
     }
