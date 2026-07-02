@@ -36,6 +36,7 @@ export type RoleSeed = {
   trainingGroupUrl?: string;
   defaultCreator?: string; // creator name
   manager?: string; // manager display name (e.g. Haria for Reddit)
+  managerHandle?: string; // manager's Telegram @handle — shown to hires ("check in with Haria (@…)")
 };
 
 export const ROLES: RoleSeed[] = [
@@ -93,6 +94,7 @@ export const ROLES: RoleSeed[] = [
     trialHours: 24,
     capacity: 20,
     manager: "Haria",
+    managerHandle: "", // <Haria's Telegram @handle — hires are told to check in with her>
     trainingGroupUrl: "", // <Haria Reddit SOP>
   },
 ];

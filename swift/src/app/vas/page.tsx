@@ -19,12 +19,22 @@ export default async function VasPage() {
     prisma.creator.findMany({ where: { active: true }, orderBy: { name: "asc" } }),
   ]);
 
-  const modelRows = creators.map((c) => ({
-    id: c.id,
-    name: c.name,
-    contentDriveUrl: c.contentDriveUrl ?? "",
-    xMainUrl: c.xMainUrl ?? "",
-  }));
+  const modelRows = creators.map((c) => {
+    let drives: Record<string, string> = {};
+    try {
+      drives = c.contentDrives ? JSON.parse(c.contentDrives) : {};
+    } catch {
+      drives = {};
+    }
+    return {
+      id: c.id,
+      name: c.name,
+      xMainUrl: c.xMainUrl ?? "",
+      // Per-role drives, falling back to the general drive so existing links show.
+      driveX: drives.x_va ?? c.contentDriveUrl ?? "",
+      driveReddit: drives.reddit_va ?? c.contentDriveUrl ?? "",
+    };
+  });
 
   const capacityRows = availability
     .slice()

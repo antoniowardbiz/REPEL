@@ -33,10 +33,18 @@ async function findOrCreateCreator(c: (typeof CREATORS)[number]) {
   });
 }
 
-async function findOrCreateManager(name: string) {
+async function findOrCreateManager(name: string, telegramHandle?: string) {
   const existing = await prisma.user.findFirst({ where: { name, role: "manager" } });
-  if (existing) return existing;
-  return prisma.user.create({ data: { name, role: "manager", status: "active" } });
+  if (existing) {
+    // Keep the handle current from config (only when config provides one).
+    if (telegramHandle && existing.telegramHandle !== telegramHandle) {
+      return prisma.user.update({ where: { id: existing.id }, data: { telegramHandle } });
+    }
+    return existing;
+  }
+  return prisma.user.create({
+    data: { name, role: "manager", status: "active", telegramHandle: telegramHandle || null },
+  });
 }
 
 async function main() {
@@ -53,7 +61,7 @@ async function main() {
   const managersByName = new Map<string, string>();
   for (const r of ROLES) {
     if (r.manager && !managersByName.has(r.manager)) {
-      const m = await findOrCreateManager(r.manager);
+      const m = await findOrCreateManager(r.manager, r.managerHandle);
       managersByName.set(r.manager, m.id);
     }
   }
