@@ -95,7 +95,7 @@ export const ROLES: RoleSeed[] = [
     trialHours: 24,
     capacity: 20,
     manager: "Haria",
-    managerHandle: "@Hariaaa22", // hires are told to check in with her
+    managerHandle: "@swiftreddit", // Reddit team inbox applicants message for account setup
     trainingGroupUrl: "", // <Haria Reddit SOP>
   },
 ];
