@@ -570,17 +570,20 @@ This is a very good role — please take it seriously.
     roleKey: "x_va",
     category: "brief",
     subject: "X VA trial brief",
-    body: `🎯 {{first_name}}, this is your X (Twitter) trial — your shot to lock in a paid {{role_name}} spot.
+    body: `🎯 {{first_name}} — this is a PAID {{trial_hours}}-hour X (Twitter) trial. It's real and it's paid: we run it so you can prove your competence running a model's page. Do it well and you lock in a paid {{role_name}} spot.
 
-It's a {{trial_hours}}hr trial. Use any X account (this is about your skill, not the account). Post multiple times a day with strong, teasy SFW photos + engaging captions, and place replies under posts that went viral in the last ~20h.
+👤 The model you're operating: {{model_name}} — you'll run her X presence like it's the job.
+🔗 Her main page: {{model_main_url}}
+📁 Post from this content: {{content_drive_url}}
+(No model content yet? Use any strong SFW photos you can source — we're judging your skill, not the exact photos.)
 
-📸 Content: this is a skills test — if you don't have model content yet, just use any strong SFW photos you can source. We're judging your posting, captions, timing and replies, not the specific photos.
+📋 HOW WE OPERATE — your daily targets for the trial:
+{{daily_target}}
+Keep it natural + SFW, put your replies under posts that went viral in the last ~20h, and keep captions teasy + on-brand.
 
-👤 Model: {{model_name}}
-🔗 Her main page (yours to run if your trial is strong): {{model_main_url}}
-📁 Content folder (if provided): {{content_drive_url}}
+📚 Full playbook (examples + do's & don'ts): {{training_group_url}}
 
-Take it seriously — strong trials get hired fast and earn the most. When your first post is up, send the link here with the word SUBMIT 🚀`,
+When your first post is up, send the link here with the word SUBMIT 🚀 — strong trials get hired fastest and earn the most.`,
   },
   {
     key: "brief_tiktok_va",

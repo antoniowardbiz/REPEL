@@ -136,6 +136,7 @@ model Trial {
   status          String    @default("not_started") // not_started | active | submitted | expired
   remind12hSent   Boolean   @default(false)
   remind2hSent    Boolean   @default(false)
+  managerNudgeSent Boolean  @default(false) // one-time nudge for a stalled managed (Reddit) account step
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 

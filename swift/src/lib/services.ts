@@ -459,7 +459,14 @@ export async function routeToManagerForAccount(applicationId: string, hasAccount
   });
   if (!app) throw new Error("application not found");
   const trial = app.trials.find((t) => t.status === "account_check" || t.status === "with_manager");
-  if (trial) await prisma.trial.update({ where: { id: trial.id }, data: { status: "with_manager" } });
+  // Reset the one-time nudge flag on entry to with_manager so the distinct
+  // "message your manager" nudge can still fire even if an account_check nudge
+  // already went out (they're two different follow-ups, tracked by one flag).
+  if (trial)
+    await prisma.trial.update({
+      where: { id: trial.id },
+      data: { status: "with_manager", managerNudgeSent: false },
+    });
 
   await sendTemplatedMessage(applicationId, hasAccount ? "account_ready" : "account_setup");
 
@@ -556,6 +563,39 @@ export async function submitTrial(
   if (AUTO_HIRE) {
     try {
       await moveStage(applicationId, "ONBOARDING", actorUserId); // creates User + auto-assigns a model
+      // Don't complete to ACTIVE if no model could be assigned FOR THIS ROLE —
+      // that would be a hired-but-orphaned VA (no model, drive or group). Scope
+      // the check to app.roleId (mirroring onboardHire) so a stale assignment
+      // from a DIFFERENT role can't mask a missing one here. Park at ONBOARDING
+      // and hard-alert so a model is assigned manually.
+      const assigned = await prisma.assignment.findFirst({
+        where: { user: { candidateId: app.candidateId }, roleId: app.roleId, status: { in: ["probation", "active"] } },
+      });
+      if (!assigned) {
+        const cand2 = await prisma.candidate.findUnique({ where: { id: app.candidateId } });
+        // Acknowledge the candidate so a hired-but-unassigned VA isn't left in
+        // total silence while ops finishes the assignment manually.
+        const hold =
+          `Great work — your trial's in ✅ We're finalising your setup now and your manager will confirm your model + details shortly. Hang tight! 🙌`;
+        const hr = await sendTelegramMessage(cand2?.telegramChatId ?? null, hold);
+        await prisma.message.create({
+          data: {
+            candidateId: app.candidateId,
+            applicationId,
+            direction: "outbound",
+            channel: "telegram",
+            templateKey: "hire_holding",
+            body: hold,
+            status: hr.status,
+          },
+        });
+        await sendOpsAlert(
+          `⚠ ${cand2?.fullName ?? app.candidateId} submitted + onboarded but NO model was assigned for ${app.roleId} (no active model?). ` +
+            `Parked at ONBOARDING — assign a model to finish the hire.`
+        );
+        await auditLog("hire_needs_model", "Application", applicationId, {}, actorUserId);
+        return trial;
+      }
       await sendTemplatedMessage(applicationId, "offer");
       await moveStage(applicationId, "ACTIVE", actorUserId);
       // Full setup message — their model, drive, daily target, pay, group. Sent

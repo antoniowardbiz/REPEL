@@ -136,7 +136,13 @@ export async function runTrialWatch(watchId: string) {
   return { rating, metrics, source: usedSource };
 }
 
-/** Run every active watch that's due (lastCheckedAt older than its interval). */
+/** Run every active watch that's due (lastCheckedAt older than its interval).
+ *  A watch keeps running while its trial is active; once the trial leaves
+ *  "active" (submitted/expired) it gets ONE final reading here — landing the
+ *  post-submission auto-draft the operator scores from — and is then stopped so
+ *  it doesn't poll forever (unbounded jobs + Reddit rate-limit risk). Stopping
+ *  only after a final run is what prevents an early submission from ending up
+ *  with a blank scorecard. */
 export async function runDueWatches() {
   const watches = await prisma.trialWatch.findMany({ where: { status: "active" } });
   const now = Date.now();
@@ -155,6 +161,12 @@ export async function runDueWatches() {
       await prisma.notification.create({
         data: { type: "watch_error", channel: "ops", payload: JSON.stringify({ watchId: w.id, error }) },
       });
+    }
+    // Retire the watch once its trial is done — after this run has landed the
+    // final auto-draft (above), so no submission is left with a blank scorecard.
+    const t = await prisma.trial.findUnique({ where: { id: w.trialId }, select: { status: true } });
+    if (t && t.status !== "active") {
+      await prisma.trialWatch.update({ where: { id: w.id }, data: { status: "stopped" } }).catch(() => {});
     }
   }
   return results;
