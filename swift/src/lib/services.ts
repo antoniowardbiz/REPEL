@@ -14,6 +14,7 @@ import { ensureTrialWatch } from "./watcher";
 import { assignVa } from "./distribution";
 import { resolveOpenRoleId } from "./capacity";
 import { ROLE_PAY, ROLE_TARGETS, ROLE_TRIAL_CONTENT } from "./roles-config";
+import { PLAYBOOKS } from "./playbooks-config";
 import { randomBytes } from "crypto";
 
 export const genStartToken = () => randomBytes(9).toString("hex");
@@ -131,6 +132,9 @@ async function buildMergeContext(applicationId: string, extra?: Partial<MergeCon
     manager_link: managerLink,
     daily_target: ROLE_TARGETS[app.role.key]?.label ?? "",
     pay_line: ROLE_PAY[app.role.key] ?? "",
+    playbook_url: PLAYBOOKS[app.role.key]
+      ? `${(process.env.NEXT_PUBLIC_BASE_URL || "").replace(/\/$/, "")}/playbook/${app.role.key}`
+      : "",
     group_invite_url: groupInvite || app.role.trainingGroupUrl || "",
     ...extra,
   };

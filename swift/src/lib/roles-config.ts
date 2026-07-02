@@ -581,7 +581,7 @@ This is a very good role — please take it seriously.
 {{daily_target}}
 Keep it natural + SFW, put your replies under posts that went viral in the last ~20h, and keep captions teasy + on-brand.
 
-📚 Full playbook (examples + do's & don'ts): {{training_group_url}}
+📚 Full playbook (how we operate, examples, do's & don'ts): {{playbook_url}}
 
 When your first post is up, send the link here with the word SUBMIT 🚀 — strong trials get hired fastest and earn the most.`,
   },
