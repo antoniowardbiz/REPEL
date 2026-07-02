@@ -17,12 +17,13 @@ export const CREATORS: CreatorSeed[] = [
   {
     name: "Lola",
     niche: "X / Twitter growth",
-    xMainUrl: "https://x.com/mostwantedbimbo",
+    xMainUrl: "", // no active main X page currently
     contentDriveUrl: "", // <Lola Drive folder>
   },
   {
     name: "Lae",
-    niche: "TikTok / Instagram",
+    niche: "X / TikTok / Instagram",
+    xMainUrl: "https://x.com/LaeDevereaux",
     contentDriveUrl: "https://drive.google.com/drive/folders/1ABHMTwixtxF2xfiu0-TLB38OtaxD4AfI",
   },
 ];
@@ -94,7 +95,7 @@ export const ROLES: RoleSeed[] = [
     trialHours: 24,
     capacity: 20,
     manager: "Haria",
-    managerHandle: "", // <Haria's Telegram @handle — hires are told to check in with her>
+    managerHandle: "@Hariaaa22", // hires are told to check in with her
     trainingGroupUrl: "", // <Haria Reddit SOP>
   },
 ];
@@ -113,7 +114,7 @@ export const ROLE_PLATFORM: Record<string, "x" | "instagram" | "reddit" | "tikto
 // Leave a role blank ("") until real terms exist: the message line auto-drops.
 export const ROLE_PAY: Record<string, string> = {
   reddit_va: "$2/hr · 4 hrs/day · +10% commission on all spend from your subs",
-  x_va: "", // <set X VA pay terms>
+  x_va: "$75 bi-weekly — rises after your first two weeks if performance is high",
   tiktok_va: "",
   ig_manager: "",
   ig_dm_handler: "",
@@ -122,7 +123,11 @@ export const ROLE_PAY: Record<string, string> = {
 
 // postsPerDay = the trial's daily output target; window is the role's trial_hours.
 export const ROLE_TARGETS: Record<string, { postsPerDay: number; label: string }> = {
-  x_va: { postsPerDay: 6, label: "6 feed posts/day + replies under fresh viral posts" },
+  x_va: {
+    postsPerDay: 6,
+    label:
+      "6 feed posts · 50-60 follows · 50-60 unfollows · 5 viral comments · likes + RTs · horny text 1-3x/day · DMs as they come",
+  },
   tiktok_va: { postsPerDay: 3, label: "3 reels/slideshows a day" },
   ig_manager: { postsPerDay: 3, label: "3 reels/day + 1 story" },
   ig_dm_handler: { postsPerDay: 1, label: "DMs worked once/day" },

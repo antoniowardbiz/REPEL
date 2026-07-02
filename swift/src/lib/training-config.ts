@@ -32,13 +32,18 @@ export const TRAINING_MODULES: Record<string, TrainingModuleConfig> = {
 Your job is to grow the model's X presence and drive attention back to her main
 account — without getting the account limited.
 
-THE DAILY TARGET
-• 6 posts to the main page every day, spread naturally across the day.
-• PLUS multiple replies placed under posts that went viral in the last 24 hours — short, witty, on-brand hooks.
+YOUR DAILY NUMBERS (every day)
+• POSTS: 6 to the main feed, spread naturally across the day.
+• FOLLOW: 50-60 — people who like/comment, and other OF creators.
+• UNFOLLOW: 50-60 (keeps the follow ratio clean).
+• VIRAL: comment under 5 posts that went viral in the last 24 hours.
+• LIKES: like posts across the niche throughout the day.
+• RT (retweets): "horny text" — text-only, no images — 1-3x a day.
+• DMs: reply to all that come in (volume depends on how many you get).
 
 WHAT GREAT LOOKS LIKE
 • Every post is quality: a strong photo with an engaging, on-persona caption — varied, never copy-paste.
-• Replies land under big, fresh viral posts where the eyeballs are.
+• Viral comments land under big, fresh posts where the eyeballs are.
 • Everything points attention back to the model's main account.
 • Match the model's voice: flirty-but-SFW, confident, never crude on a SFW account.
 
