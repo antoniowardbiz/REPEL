@@ -40,6 +40,21 @@ model Creator {
   assignments    Assignment[]
   telegramGroups TelegramGroup[]
   accounts       Account[]
+  managers       CreatorManager[]
+}
+
+// Which managers oversee which models (many-to-many). A model can have several
+// managers and a manager can cover several models.
+model CreatorManager {
+  id        String   @id @default(cuid())
+  creatorId String
+  userId    String
+  createdAt DateTime @default(now())
+
+  creator Creator @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([creatorId, userId])
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -219,6 +234,7 @@ model User {
 
   fromCandidate Candidate?   @relation("CandidateToUser", fields: [candidateId], references: [id])
   managedRoles  Role[]       @relation("RoleManager")
+  managesModels CreatorManager[]
   scoreCards    ScoreCard[]
   assignments   Assignment[] @relation("UserAssignments")
   accessGrants  AccessGrant[]

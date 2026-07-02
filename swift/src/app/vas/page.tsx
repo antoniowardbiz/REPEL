@@ -8,7 +8,7 @@ import ModelLinksEditor from "@/components/ModelLinksEditor";
 export const dynamic = "force-dynamic";
 
 export default async function VasPage() {
-  const [report, assignments, availability, creators] = await Promise.all([
+  const [report, assignments, availability, creators, managers] = await Promise.all([
     balanceReport(),
     prisma.assignment.findMany({
       where: { status: { in: ["probation", "active"] } },
@@ -17,7 +17,19 @@ export default async function VasPage() {
     }),
     roleAvailability(),
     prisma.creator.findMany({ where: { active: true }, orderBy: { name: "asc" } }),
+    prisma.user.findMany({
+      where: { role: "manager", status: "active" },
+      include: { managesModels: { include: { creator: true } }, managedRoles: true },
+      orderBy: { name: "asc" },
+    }),
   ]);
+
+  const managerRows = managers.map((u) => ({
+    name: u.name,
+    handle: u.telegramHandle,
+    models: u.managesModels.map((cm) => cm.creator.name).sort(),
+    reddit: u.managedRoles.some((r) => r.key === "reddit_va"),
+  }));
 
   const modelRows = creators.map((c) => {
     let drives: Record<string, string> = {};
@@ -68,6 +80,35 @@ export default async function VasPage() {
           agent. Edit + Save — live immediately, no deploy.
         </p>
         <ModelLinksEditor models={modelRows} />
+      </section>
+
+      {/* Managers roster: who oversees which models + the Reddit team */}
+      <section className="card mb-6 p-4">
+        <h2 className="mb-1 font-display text-base font-semibold">Managers</h2>
+        <p className="mb-3 text-sm text-muted">Who oversees which models, plus the Reddit VA manager.</p>
+        <div className="space-y-2">
+          {managerRows.map((m) => (
+            <div
+              key={m.name}
+              className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-line bg-panel2 p-2.5"
+            >
+              <div>
+                <span className="text-sm font-semibold">{m.name}</span>
+                {m.handle && <span className="ml-2 font-mono text-[11px] text-muted">{m.handle}</span>}
+              </div>
+              <div className="flex flex-wrap items-center gap-1.5">
+                {m.reddit && <span className="pill bg-brand/15 text-brand">Reddit VAs</span>}
+                {m.models.map((mn) => (
+                  <span key={mn} className="badge">
+                    {mn}
+                  </span>
+                ))}
+                {m.models.length === 0 && !m.reddit && <span className="text-[11px] text-muted">—</span>}
+              </div>
+            </div>
+          ))}
+          {managerRows.length === 0 && <p className="text-sm text-muted">No managers yet.</p>}
+        </div>
       </section>
 
       {/* Mass-hire: role headcount targets + steering */}

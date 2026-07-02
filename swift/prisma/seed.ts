@@ -1,6 +1,6 @@
 /* eslint-disable no-console */
 import { PrismaClient } from "@prisma/client";
-import { CREATORS, ROLES, RUBRICS, TEMPLATES } from "../src/lib/roles-config";
+import { CREATORS, ROLES, RUBRICS, TEMPLATES, MANAGERS } from "../src/lib/roles-config";
 import { TRAINING_MODULES } from "../src/lib/training-config";
 import { computeWeightedTotal, tierFor } from "../src/lib/scoring";
 import { randomBytes } from "crypto";
@@ -207,6 +207,28 @@ async function main() {
     }
   }
   console.log(`  telegram groups: ${groupCount}`);
+
+  // ── Managers ↔ models roster ────────────────────────────────────────────────
+  // Create/refresh the manager users and link each to the models they oversee.
+  // Haria's Reddit-VA management comes from ROLES.reddit_va.manager separately.
+  let managerLinks = 0;
+  for (const m of MANAGERS) {
+    const user = await findOrCreateManager(m.name, m.telegramHandle);
+    if (user.status !== "active") {
+      await prisma.user.update({ where: { id: user.id }, data: { status: "active" } });
+    }
+    for (const modelName of m.models) {
+      const creatorId = creatorsByName.get(modelName);
+      if (!creatorId) continue;
+      await prisma.creatorManager.upsert({
+        where: { creatorId_userId: { creatorId, userId: user.id } },
+        update: {},
+        create: { creatorId, userId: user.id },
+      });
+      managerLinks++;
+    }
+  }
+  console.log(`  managers: ${MANAGERS.length} (${managerLinks} model links)`);
 
   // ── Demo / sample board data ────────────────────────────────────────────────
   // This is SAMPLE data for local + preview only. It must NEVER seed fake
