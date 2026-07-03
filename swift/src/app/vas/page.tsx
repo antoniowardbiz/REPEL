@@ -2,13 +2,15 @@ import { prisma } from "@/lib/db";
 import { balanceReport } from "@/lib/distribution";
 import { roleAvailability } from "@/lib/capacity";
 import { AUTO_HIRE } from "@/lib/services";
+import { ROLE_PAY } from "@/lib/roles-config";
 import RoleCapacityEditor from "@/components/RoleCapacityEditor";
+import RolePayEditor from "@/components/RolePayEditor";
 import ModelLinksEditor from "@/components/ModelLinksEditor";
 
 export const dynamic = "force-dynamic";
 
 export default async function VasPage() {
-  const [report, assignments, availability, creators, managers] = await Promise.all([
+  const [report, assignments, availability, creators, managers, roles] = await Promise.all([
     balanceReport(),
     prisma.assignment.findMany({
       where: { status: { in: ["probation", "active"] } },
@@ -22,6 +24,7 @@ export default async function VasPage() {
       include: { managesModels: { include: { creator: true } }, managedRoles: true },
       orderBy: { name: "asc" },
     }),
+    prisma.role.findMany({ where: { active: true }, orderBy: { displayName: "asc" } }),
   ]);
 
   const managerRows = managers.map((u) => ({
@@ -62,6 +65,15 @@ export default async function VasPage() {
       recent: r.recent,
     }));
   const topNeed = availability.find((r) => r.open) ?? null;
+
+  // Pay line per role — the DB value when an operator has set one, else the
+  // built-in default. Saved live from the dashboard (no deploy).
+  const payRows = roles.map((r) => ({
+    key: r.key,
+    displayName: r.displayName,
+    pay: r.pay ?? ROLE_PAY[r.key] ?? "",
+    custom: r.pay != null,
+  }));
 
   const max = Math.max(1, ...report.loads.map((l) => l.count));
 
@@ -139,6 +151,16 @@ export default async function VasPage() {
           )}
         </p>
         <RoleCapacityEditor rows={capacityRows} />
+      </section>
+
+      {/* Pay per role: the pay line VAs actually see in their welcome + from the bot */}
+      <section className="card mb-6 p-4">
+        <h2 className="mb-1 font-display text-base font-semibold">Pay per role</h2>
+        <p className="mb-3 text-sm text-muted">
+          The exact pay line each VA sees in their welcome message and whenever the bot answers a pay
+          question. Edit + Save — live immediately, no deploy. Blank resets to the built-in default.
+        </p>
+        <RolePayEditor rows={payRows} />
       </section>
 
       {/* Distribution */}

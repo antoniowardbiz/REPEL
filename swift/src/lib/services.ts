@@ -131,7 +131,7 @@ async function buildMergeContext(applicationId: string, extra?: Partial<MergeCon
     manager_handle: manager?.telegramHandle ?? "",
     manager_link: managerLink,
     daily_target: ROLE_TARGETS[app.role.key]?.label ?? "",
-    pay_line: ROLE_PAY[app.role.key] ?? "",
+    pay_line: app.role.pay ?? ROLE_PAY[app.role.key] ?? "", // live-editable pay (dashboard) → code default fallback
     playbook_url: PLAYBOOKS[app.role.key]
       ? `${(process.env.NEXT_PUBLIC_BASE_URL || "").replace(/\/$/, "")}/playbook/${app.role.key}`
       : "",

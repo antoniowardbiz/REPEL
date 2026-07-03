@@ -66,6 +66,7 @@ model Role {
   displayName      String
   trialHours       Int      @default(24)
   capacity         Int? // target headcount; when the role's active funnel hits this it "closes" on the apply form (null = unlimited)
+  pay              String? // pay line shown to VAs (welcome + AI support). null = fall back to the ROLE_PAY code default. Editable live on the dashboard.
   trainingGroupUrl String?
   defaultCreatorId String?
   managerUserId    String?
