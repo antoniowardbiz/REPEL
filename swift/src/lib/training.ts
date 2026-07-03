@@ -6,7 +6,8 @@ import { prisma } from "./db";
 import { Stage } from "./constants";
 import { parseJSON } from "./serialize";
 import { stageIndex, isTerminal } from "./stages";
-import { moveStage } from "./services";
+import { moveStage, onboardAndActivate } from "./services";
+import { ACCOUNT_MANAGED_ROLES } from "./roles-config";
 
 export type PublicQuestion = { prompt: string; options: string[] };
 
@@ -145,7 +146,15 @@ export async function submitQuiz(token: string, answers: number[]): Promise<Subm
   const idx = stageIndex(app.stage as Stage);
   const trialIdx = stageIndex("TRIAL_READY");
   if (!isTerminal(app.stage as Stage) && idx >= 0 && idx < trialIdx) {
-    await moveStage(app.id, "TRIAL_READY");
+    // Manager-onboarded roles (Reddit) have no trial — passing the quiz onboards
+    // them straight away and the system auto-hands a pool account. Self-serve
+    // roles (X) go to a short trial on their own account first, then get hired +
+    // handed an account on submit.
+    if (ACCOUNT_MANAGED_ROLES.includes(app.role.key)) {
+      await onboardAndActivate(app.id);
+    } else {
+      await moveStage(app.id, "TRIAL_READY");
+    }
     proceeded = true;
   }
 

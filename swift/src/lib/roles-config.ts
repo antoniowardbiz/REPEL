@@ -599,7 +599,7 @@ This is a very good role — please take it seriously.
 
 This is a PAID {{trial_hours}}-hour X (Twitter) trial.
 
-We run it so you can prove your competence running a model's page. You can use any account you have — this is just to complete the trial.
+Use any account of your own for this — it's just a short trial so we can see you understand how we operate. Pass it and you're given your own account to run full-time.
 
 👤 The model you're operating: {{model_name}} — you'll run her X presence like it's the job.
 
@@ -756,13 +756,12 @@ Once you're posting, drop your link here with the word SUBMIT 🚀`,
 💰 Your pay: {{pay_line}}
 👥 Join your team group: {{group_invite_url}}
 
-⚡ First step to start earning — your manager gets you fully set up (account access + payment):
-👉 Tap here: {{manager_link}}  ({{manager_handle}})
+🔑 Your account lands in the very next message — log in from your own device and you're ready to go.
 
-Copy-paste to them:
-"Hi! Just got hired as {{role_name}} for {{model_name}} ✅ Ready to start — please set me up with account access + payment 🙏"
+🧭 Your manager sorts your payment and coaches you day to day:
+👉 {{manager_link}}  ({{manager_handle}})
 
-They'll get you going and confirm when you start. From there: hit your daily target, check in daily, keep the account safe.
+From there it's simple: hit your daily target, check in every day, keep the account safe.
 
 Questions any time — message me here 🤖`,
   },
