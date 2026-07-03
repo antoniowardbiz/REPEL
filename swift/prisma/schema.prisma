@@ -42,6 +42,7 @@ model Creator {
   telegramGroups TelegramGroup[]
   accounts       Account[]
   managers       CreatorManager[]
+  trialLinks     TrialLink[]
 }
 
 // Which managers oversee which models (many-to-many). A model can have several
@@ -297,6 +298,8 @@ model Assignment {
   managerUserId String?
   promoLink     String? // this VA's personal promo link (the /go/<slug> redirect) — auto-generated at hire, tracked to them
   trackSlug     String?  @unique // short slug behind their promo link; /go/<slug> redirects to the model's OF trial link + logs a click
+  trialLinkUrl   String? // the Infloww trial link this VA was assigned from the pool — /go/<slug> redirects here (per-VA sub attribution)
+  trialLinkLabel String? // the Infloww label of that link (e.g. "LOLA-R-3") so you can match earnings back to this VA in Infloww
   startDate     DateTime @default(now())
   status        String   @default("probation") // probation | active | ended
   createdAt     DateTime @default(now())
@@ -311,6 +314,27 @@ model Assignment {
   // 20260702110000_assignment_unique_active (SQLite partial indexes can't be
   // expressed in the Prisma schema). It blocks duplicate ACTIVE assignments
   // while still allowing re-assignment after an old one has 'ended'.
+}
+
+// A pool of Infloww free-trial links (one per VA), imported in bulk and tagged
+// by model + platform from their label (e.g. "LOLA-R-3" = Lola, reddit). On
+// hire the bot claims the next available one matching the VA's model+platform
+// and points their /go/<slug> link at it, so subs are attributed per VA in
+// Infloww. The label maps a VA back to their Infloww earnings row.
+model TrialLink {
+  id           String   @id @default(cuid())
+  label        String // Infloww link name, e.g. "LOLA-R-3"
+  url          String   @unique // the Infloww free-trial URL
+  creatorId    String
+  platform     String // reddit | x
+  status       String   @default("available") // available | assigned
+  assignmentId String?  @unique // the VA assignment that claimed it
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  creator Creator @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+
+  @@index([creatorId, platform, status])
 }
 
 // A Telegram group that acts as a "folder" (Bot API can't manage real chat

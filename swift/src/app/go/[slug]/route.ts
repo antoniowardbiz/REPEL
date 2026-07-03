@@ -24,7 +24,10 @@ export async function GET(_req: Request, { params }: { params: { slug: string } 
       .catch(() => {});
   }
 
-  const dest = assignment?.creator?.ofTrialUrl || assignment?.creator?.xMainUrl || null;
+  // Prefer this VA's OWN Infloww trial link (per-VA sub attribution). Fall back
+  // to the model's shared OF trial link, then their main page.
+  const dest =
+    assignment?.trialLinkUrl || assignment?.creator?.ofTrialUrl || assignment?.creator?.xMainUrl || null;
   if (!dest) {
     // No destination set for this model yet — send them to OF rather than erroring.
     return NextResponse.redirect("https://onlyfans.com", 302);

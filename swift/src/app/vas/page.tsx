@@ -8,11 +8,13 @@ import RolePayEditor from "@/components/RolePayEditor";
 import AssignmentPromoLink from "@/components/AssignmentPromoLink";
 import ModelLinksEditor from "@/components/ModelLinksEditor";
 import PromoBackfillButton from "@/components/PromoBackfillButton";
+import TrialLinkPool from "@/components/TrialLinkPool";
+import { trialLinkPoolStats } from "@/lib/trial-links";
 
 export const dynamic = "force-dynamic";
 
 export default async function VasPage() {
-  const [report, assignments, availability, creators, managers, roles] = await Promise.all([
+  const [report, assignments, availability, creators, managers, roles, poolBuckets] = await Promise.all([
     balanceReport(),
     prisma.assignment.findMany({
       where: { status: { in: ["probation", "active"] } },
@@ -27,6 +29,7 @@ export default async function VasPage() {
       orderBy: { name: "asc" },
     }),
     prisma.role.findMany({ where: { active: true }, orderBy: { displayName: "asc" } }),
+    trialLinkPoolStats(),
   ]);
 
   const managerRows = managers.map((u) => ({
@@ -206,6 +209,9 @@ export default async function VasPage() {
         </div>
       </section>
 
+      {/* Trial-link pool */}
+      <TrialLinkPool buckets={poolBuckets} />
+
       {/* Assignments */}
       <section className="card p-4">
         <div className="mb-3 flex items-center justify-between">
@@ -221,6 +227,7 @@ export default async function VasPage() {
                 <th className="px-3 py-2 text-left font-medium">Model</th>
                 <th className="px-3 py-2 text-left font-medium">Status</th>
                 <th className="px-3 py-2 text-right font-medium">Clicks</th>
+                <th className="px-3 py-2 text-left font-medium">Infloww link</th>
                 <th className="px-3 py-2 text-left font-medium">Promo link (auto)</th>
               </tr>
             </thead>
@@ -236,6 +243,13 @@ export default async function VasPage() {
                   <td className="px-3 py-2 text-right font-mono tabular-nums">
                     {clicksByUser.get(a.userId) ?? 0}
                   </td>
+                  <td className="px-3 py-2">
+                    {a.trialLinkLabel ? (
+                      <span className="pill bg-panel2 font-mono text-[11px] text-good">{a.trialLinkLabel}</span>
+                    ) : (
+                      <span className="text-[11px] text-faint">— none</span>
+                    )}
+                  </td>
                   <td className="px-3 py-2" style={{ minWidth: 220 }}>
                     <AssignmentPromoLink id={a.id} promoLink={a.promoLink ?? ""} />
                   </td>
@@ -243,7 +257,7 @@ export default async function VasPage() {
               ))}
               {assignments.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="px-3 py-4 text-center text-muted">
+                  <td colSpan={7} className="px-3 py-4 text-center text-muted">
                     No assignments yet — VAs are assigned automatically when hired (Onboarding).
                   </td>
                 </tr>
