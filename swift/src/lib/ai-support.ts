@@ -9,7 +9,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { prisma } from "./db";
 import { sendTelegramMessage, sendOpsAlert } from "./telegram";
-import { ROLE_PAY, ROLE_TARGETS } from "./roles-config";
+import { ROLE_PAY, ROLE_TARGETS, ACCOUNT_MANAGED_ROLES } from "./roles-config";
 import { deadlineLabel } from "./ui";
 
 const MODEL = process.env.ANTHROPIC_MODEL || "claude-opus-4-8";
@@ -62,22 +62,27 @@ async function buildSupportContext(candidateId: string): Promise<string | null> 
   // brief. Give the agent the RIGHT next step so it points people to their
   // manager instead of promising an auto-brief that never comes.
   const manager = app.role.manager;
-  const managed = Boolean(app.role.managerUserId && manager);
   const managerRef = manager
     ? `${manager.name}${manager.telegramHandle ? ` (${manager.telegramHandle})` : ""}`
-    : "the operator";
+    : "their manager";
   const isReddit = app.role.key === "reddit_va";
-  const processSteps = managed
+  // Account-managed roles (Reddit) run the account_check YES/NO gate before the
+  // trial. Self-serve roles (X) skip it — they trial on their own account, then
+  // the manager sets up account access + payment AFTER they're hired. Branch on
+  // the same list that gates the flow so the agent never describes a step the
+  // candidate won't actually see.
+  const accountManaged = ACCOUNT_MANAGED_ROLES.includes(app.role.key);
+  const processSteps = accountManaged
     ? `1. Pass the training quiz on their training page (everyone passes — it only flags weak spots to coach).
 2. Answer the account question here (do they have a usable ${isReddit ? "Reddit " : ""}account?). EITHER answer leads to the SAME next step: they go to their manager ${managerRef}, who checks or sets up and WARMS the account so it never gets banned, then tells them exactly what to post. If they say "what now / nothing's happening / I passed" at this stage, the answer is: message ${managerRef} to get your account sorted.
 3. Once they're posting, send the post link here with the word SUBMIT (${isReddit ? "Reddit" : "platform"} links count automatically).
 4. Submitting = hired: welcome with model, drive, target, pay, group.
 5. After hire: hit the daily target, check in with ${managerRef} daily, keep the account safe (natural pacing, no password changes, stop + report anything risky like a shadowban).`
     : `1. Pass the training quiz on their training page → trial unlocks automatically.
-2. The trial brief arrives here in Telegram; they do the work on their account.
+2. The trial brief arrives here in Telegram; they run it on ANY account of their own — the trial only proves they can do the job.
 3. To SUBMIT: send the link to their work here with the word SUBMIT (X/platform links count automatically).
-4. Submitting = hired: they get a welcome with model, drive, target, pay, group.
-5. After hire: hit the daily target, check in with the manager daily, keep the account safe (no nudity on SFW platforms, no password changes, natural pacing, stop + report anything risky like a shadowban).`;
+4. Submitting = hired.
+5. AFTER HIRE the FIRST thing they do is message their manager ${managerRef} to get set up — account access + payment. So if a hired VA asks "how do I access the account / when do I start / what about payment / what do I do now", the answer is: message ${managerRef} to get your account access + payment sorted, and they'll confirm your start. After that: hit the daily target, check in daily, keep the account safe (no password changes, natural pacing, stop + report anything risky like a shadowban).`;
 
   return `CANDIDATE
 Name: ${candidate.fullName}
@@ -146,8 +151,8 @@ export async function handleCandidateMessage(
   const system = `You are the support agent inside SWIFT's Telegram recruitment bot, texting a VA candidate/hire. Personality: professional, warm, brief — 1-4 short sentences, sound human, occasional emoji is fine. Never mention being an AI.
 
 Decision rules:
-- "reply": answer questions you can ground in the CONTEXT (process, their stage, model, drive, targets, pay terms shown, how to submit, account safety). Nudge action ("pass your quiz to unlock the trial", "send your link with SUBMIT").
-- "escalate": payment disputes/amounts owed, changing pay terms, account bans or lockouts, requests for credentials/2FA/passwords, personal or legal matters, complaints about people, anything the CONTEXT doesn't cover. Do NOT guess.
+- "reply": answer questions you can ground in the CONTEXT (process, their stage, model, drive, targets, pay terms shown, how to submit, account safety). Nudge action ("pass your quiz to unlock the trial", "send your link with SUBMIT"). IMPORTANT: a hired VA asking how to START, how to get ACCOUNT ACCESS, when they begin, or how to get PAYMENT SET UP → do NOT escalate; tell them to message their manager (name + handle are in CONTEXT) to get account access + payment sorted — that's the real next step, and the manager confirms their start.
+- "escalate": payment DISPUTES/amounts owed, changing pay terms, account bans or lockouts, requests for credentials/2FA/passwords, personal or legal matters, complaints about people, anything the CONTEXT doesn't cover. Do NOT guess. (Routine "how do I get set up / get paid set up" is a REPLY → point them to their manager, not an escalation.)
 - "ignore": pure chatter needing no reply (ok, thanks, emoji, greetings already handled).
 Never invent links, amounts, or promises not in the CONTEXT. Never send a raw password/credential. Do not re-trigger submissions.`;
 
