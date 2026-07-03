@@ -83,7 +83,105 @@ export const PLAYBOOKS: Record<string, Playbook> = {
       },
       {
         h: "Pay",
-        body: "$2/hr · 4 hrs/day · +10% commission on all spend from your subs. Top Reddit VAs make $500+/week.",
+        body: "$75 bi-weekly + 10% commission on all spend from your subs — rises after your first two weeks if performance is high. Top Reddit VAs make $500+/week.",
+      },
+    ],
+  },
+
+  // ── Manager playbooks ──────────────────────────────────────────────────────
+  // Forward to the person running each manager handle. Same skin as the VA
+  // playbooks; served at /playbook/x_manager and /playbook/reddit_manager.
+  x_manager: {
+    title: "X (Twitter) Manager — Playbook",
+    intro:
+      "Every X VA reaches you already hired — they pass a self-serve trial, then the bot sends them straight to you. Your job is to get them live and earning fast: account access, payment, and their first day sorted.",
+    sections: [
+      {
+        h: "How they arrive",
+        body:
+          "They message you already hired, usually: “Just got hired as X VA for [model] — ready for account access + payment.” That's your cue. No trial to run, no account to warm — they've proven they can do the job. Get them set up.",
+      },
+      {
+        h: "1 · Welcome + connect",
+        body: "Warm first — people who feel part of a team work harder.",
+        bullets: [
+          "“Congrats & welcome to the team 🎉 I'm your X manager — you're running [model].”",
+          "Get their name, timezone (their posting hours), and any X/promo experience",
+        ],
+      },
+      {
+        h: "2 · Account access",
+        body:
+          "Get them into the model's X account the way we do it — secure login / shared access. Confirm they can post, comment, retweet and handle DMs before moving on.",
+        bullets: [
+          "Never share a raw password in plain chat",
+          "Set the rules up front: no password changes, natural pacing, stop + report anything risky (shadowban, lock)",
+        ],
+      },
+      {
+        h: "3 · Payment",
+        body:
+          "Set up how they get paid and confirm the terms + payout schedule so there's no confusion later. (Current pay is on the SWIFT dashboard.)",
+      },
+      {
+        h: "4 · Add to the X team group",
+        body:
+          "Add them to the SWIFT X VA group so they see the rules, content, reminders and the rest of the team.",
+      },
+      {
+        h: "5 · First day",
+        body: "Point them at the content drive + their daily target, and send them the VA playbook for examples + do's and don'ts.",
+        bullets: [
+          "Daily: 6 feed posts · comment on 5 viral posts · RTs + teasy text 1–3×/day · DMs as they come",
+          "VA playbook: /playbook/x_va",
+        ],
+      },
+      {
+        h: "Ongoing",
+        body:
+          "They check in with you daily, hit their target, and keep the account safe. Watch for risk (shadowban, engagement drop) and tell them to stop + report the moment something looks off.",
+      },
+    ],
+  },
+  reddit_manager: {
+    title: "Reddit Manager — Playbook",
+    intro:
+      "Every Reddit VA is handed to you after they pass the quiz — either “I have an account” or “I need one set up.” Your job is to get them a safe, warmed account, into the group, and posting.",
+    sections: [
+      {
+        h: "How they arrive",
+        body:
+          "The bot sends them to you with one of two lines: “I passed the quiz — I have a Reddit account” (with username) or “I don't have one, can you set me up?” Either way, same goal: a warmed, safe account ready to post.",
+      },
+      {
+        h: "1 · Welcome + connect",
+        body:
+          "2–3 friendly messages before business — get their name, where they're based + timezone, and whether they've done Reddit/promo before. People who feel connected work harder and stay.",
+      },
+      {
+        h: "2 · The account",
+        body:
+          "If they have one: get the username and check age / karma / not shadowbanned. If it's weak or brand-new, treat it like no account. If they don't have one: set one up on a clean email and save the login safely.",
+      },
+      {
+        h: "3 · Warm it before ANY posting",
+        body:
+          "This is what stops bans. Spend a day or two joining subs, upvoting, a few comments, building karma, verifying where needed. Tell them why: “We warm it first so it never gets banned — that protects your money.”",
+      },
+      {
+        h: "4 · Add to the group + first task",
+        body:
+          "Add them to the SWIFT Reddit VA's group (rules are pinned), then give them the content to post, the allowed subs, and the spacing rules.",
+      },
+      {
+        h: "5 · 🔑 Get them to SUBMIT",
+        body:
+          "This is the step that hires them. Once their first post is live, they must go back to the SWIFT bot chat (not your DM) and send the post link + the word SUBMIT. If they only tell you “I posted,” nothing happens — say it clearly.",
+      },
+      {
+        h: "Ongoing",
+        body:
+          "They check in daily, hit target, keep the account safe. Any removals or shadowban risk → stop and report to you before it becomes a ban.",
       },
     ],
   },
