@@ -13,7 +13,7 @@ import { routeToFolderForStage } from "./folders";
 import { ensureTrialWatch } from "./watcher";
 import { assignVa } from "./distribution";
 import { resolveOpenRoleId } from "./capacity";
-import { ROLE_PAY, ROLE_TARGETS, ROLE_TRIAL_CONTENT } from "./roles-config";
+import { ROLE_PAY, ROLE_TARGETS, ROLE_TRIAL_CONTENT, ACCOUNT_MANAGED_ROLES } from "./roles-config";
 import { PLAYBOOKS } from "./playbooks-config";
 import { randomBytes } from "crypto";
 
@@ -286,11 +286,12 @@ export async function moveStage(applicationId: string, to: Stage, actorUserId?: 
 
   if (automation?.kind === "create_trial_and_brief") {
     const role = app.role;
-    // Managed roles (e.g. Reddit → Haria) need an account first. Ask the simple
-    // account question BEFORE starting the clock: a candidate with no account
-    // gets routed to the manager to set one up + warm it, so nothing is banned.
-    // Unmanaged roles (e.g. X — "use any account") get the trial straight away.
-    if (role.managerUserId) {
+    // Account-managed roles (Reddit → Haria) need an account FIRST: ask the simple
+    // account question before the clock, then route to the manager to set one up +
+    // warm it so nothing is banned. Every other role — including X, which also has
+    // a manager (@swiftxvas) purely as its contact — uses any account, so it goes
+    // straight to the self-serve trial brief.
+    if (role.managerUserId && ACCOUNT_MANAGED_ROLES.includes(role.key)) {
       let trial = app.trials.find((t) => t.status === "not_started") ?? null;
       if (!trial) {
         trial = await prisma.trial.create({ data: { applicationId, creatorId: role.defaultCreatorId, status: "account_check" } });

@@ -29,6 +29,7 @@ export default async function VasPage() {
     handle: u.telegramHandle,
     models: u.managesModels.map((cm) => cm.creator.name).sort(),
     reddit: u.managedRoles.some((r) => r.key === "reddit_va"),
+    x: u.managedRoles.some((r) => r.key === "x_va"),
   }));
 
   const modelRows = creators.map((c) => {
@@ -98,12 +99,13 @@ export default async function VasPage() {
               </div>
               <div className="flex flex-wrap items-center gap-1.5">
                 {m.reddit && <span className="pill bg-brand/15 text-brand">Reddit VAs</span>}
+                {m.x && <span className="pill bg-brand/15 text-brand">X VAs</span>}
                 {m.models.map((mn) => (
                   <span key={mn} className="badge">
                     {mn}
                   </span>
                 ))}
-                {m.models.length === 0 && !m.reddit && <span className="text-[11px] text-muted">—</span>}
+                {m.models.length === 0 && !m.reddit && !m.x && <span className="text-[11px] text-muted">—</span>}
               </div>
             </div>
           ))}

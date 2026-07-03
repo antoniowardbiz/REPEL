@@ -64,6 +64,8 @@ export const ROLES: RoleSeed[] = [
     trialHours: 24,
     capacity: 15,
     defaultCreator: "Lola",
+    manager: "SwiftX Team", // X VAs report to @swiftxvas (kept separate from Reddit's @swiftreddit)
+    managerHandle: "@swiftxvas",
     trainingGroupUrl: "", // <add>
   },
   // ── Retired: Instagram/TikTok ban waves make these unscalable, so all intake
@@ -116,6 +118,12 @@ export const ROLES: RoleSeed[] = [
     trainingGroupUrl: "", // <Haria Reddit SOP>
   },
 ];
+
+// Roles whose PRE-TRIAL flow runs through the manager to set up + warm an account
+// (the "do you have an account?" YES/NO handoff). Other roles with a manager
+// (e.g. X → @swiftxvas) still get that manager as a contact, but go straight to
+// the self-serve trial brief — they use any account, so no account setup step.
+export const ACCOUNT_MANAGED_ROLES = ["reddit_va"];
 
 // ── Platform + trial output targets (drive the watcher's 1–10 rating) ────────
 export const ROLE_PLATFORM: Record<string, "x" | "instagram" | "reddit" | "tiktok"> = {
@@ -608,6 +616,8 @@ We run it so you can prove your competence running a model's page. You can use a
 
 📚 Full playbook (how we operate, examples, do's & don'ts): {{playbook_url}}
 
+💬 Any questions or to check in, message the X team: {{manager_link}}
+
 When your first post is up, send the link here with the word SUBMIT 🚀 — strong trials get hired fastest and earn the most.`,
   },
   {
@@ -687,7 +697,7 @@ When your first post is up, send the link here with the word SUBMIT 🚀`,
 
 We'd love to bring you on as a {{role_name}} for {{model_name}}. Here's the exciting part: your income scales with your results, and our top performers earn the most — so bring your A-game.
 
-✅ Next: I'll get your onboarding started — payment setup + account access. Let's build something big 🚀`,
+✅ Next up: your full setup, plus how to get your account access + payment sorted with your manager. Let's build something big 🚀`,
   },
   {
     key: "account_check",
@@ -744,12 +754,17 @@ Once you're posting, drop your link here with the word SUBMIT 🚀`,
 📁 Your content drive: {{content_drive_url}}
 🎯 Your daily target: {{daily_target}}
 💰 Your pay: {{pay_line}}
-🧭 Your manager: {{manager_label}}
 👥 Join your team group: {{group_invite_url}}
 
-From here it's simple: hit your daily target, check in every day, and keep the account safe. Payment setup gets confirmed with you at your first check-in.
+⚡ First step to start earning — your manager gets you fully set up (account access + payment):
+👉 Tap here: {{manager_link}}  ({{manager_handle}})
 
-Questions any time — just message me here and I'll answer right away 🤖`,
+Copy-paste to them:
+"Hi! Just got hired as {{role_name}} for {{model_name}} ✅ Ready to start — please set me up with account access + payment 🙏"
+
+They'll get you going and confirm when you start. From there: hit your daily target, check in daily, keep the account safe.
+
+Questions any time — message me here 🤖`,
   },
   {
     key: "retrial",
