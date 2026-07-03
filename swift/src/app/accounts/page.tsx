@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db";
 import { accountsOverview } from "@/lib/accounts";
 import AccountsBoard from "@/components/AccountsBoard";
+import BulkAddAccounts from "@/components/BulkAddAccounts";
 
 export const dynamic = "force-dynamic";
 
@@ -26,6 +27,7 @@ export default async function AccountsPage() {
         The account inventory per model, each account&apos;s warm-status, and which VAs hold access. When
         someone leaves, one-click offboard revokes everything they can touch.
       </p>
+      <BulkAddAccounts creators={creators} />
       <AccountsBoard accounts={accounts} users={users} creators={creators} />
     </div>
   );

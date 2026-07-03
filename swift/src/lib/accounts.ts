@@ -15,6 +15,7 @@ export async function createAccount(input: {
   platform: string;
   handle: string;
   label?: string | null;
+  login?: string | null;
   creatorId?: string | null;
   status?: string;
   notes?: string | null;
@@ -31,12 +32,80 @@ export async function createAccount(input: {
       platform,
       handle: input.handle.trim(),
       label: input.label?.trim() || null,
+      login: input.login?.trim() || null,
       creatorId: input.creatorId || null,
       status,
       notes: input.notes?.trim() || null,
     },
   });
   await audit("account_created", "Account", account.id, { platform, handle: account.handle });
+  return account;
+}
+
+/**
+ * Bulk-load a batch of bought accounts into the pool. Each line is one account's
+ * credential (e.g. "username:password" or "user:pass:email:token"). The handle
+ * is parsed as the first field before ":"; the whole line is kept as `login`.
+ * Blank lines and exact duplicates (same login) are skipped.
+ */
+export async function createAccountsBulk(input: {
+  platform: string;
+  creatorId?: string | null;
+  lines: string[];
+}) {
+  const platform = (ACCOUNT_PLATFORMS as readonly string[]).includes(input.platform)
+    ? input.platform
+    : "other";
+  const seen = new Set<string>();
+  const rows = input.lines
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0)
+    .filter((l) => (seen.has(l) ? false : (seen.add(l), true)))
+    .map((login) => ({
+      platform,
+      handle: (login.split(":")[0] || login).trim().slice(0, 120),
+      login,
+      creatorId: input.creatorId || null,
+      status: "warming",
+    }));
+  if (rows.length === 0) return { created: 0 };
+  // Skip logins already in the pool so re-pasting the same file doesn't dupe.
+  const existing = await prisma.account.findMany({
+    where: { login: { in: rows.map((r) => r.login) } },
+    select: { login: true },
+  });
+  const have = new Set(existing.map((e) => e.login));
+  const fresh = rows.filter((r) => !have.has(r.login));
+  if (fresh.length === 0) return { created: 0, skipped: rows.length };
+  await prisma.account.createMany({ data: fresh });
+  await audit("accounts_bulk_created", "Account", "bulk", { platform, count: fresh.length });
+  return { created: fresh.length, skipped: rows.length - fresh.length };
+}
+
+/**
+ * Claim the next free pool account for a VA: an account with a login, no active
+ * grant, and a usable status, matching the platform (and model when given).
+ * Grants it to the user and returns it — or null if the pool is empty. Used by
+ * the auto-handout on hire so a claimed account leaves the pool for everyone else.
+ */
+export async function claimNextAccount(input: {
+  platform: string;
+  creatorId?: string | null;
+  userId: string;
+}) {
+  const account = await prisma.account.findFirst({
+    where: {
+      platform: input.platform,
+      login: { not: null },
+      status: { in: ["warming", "active"] },
+      grants: { none: { status: "active" } },
+      ...(input.creatorId ? { creatorId: input.creatorId } : {}),
+    },
+    orderBy: { createdAt: "asc" }, // oldest first (FIFO through the batch)
+  });
+  if (!account) return null;
+  await grantAccess(account.id, input.userId, "auto-handout");
+  await audit("account_claimed", "Account", account.id, { userId: input.userId });
   return account;
 }
 
@@ -89,6 +158,8 @@ export type AccountView = {
   platform: string;
   handle: string;
   label: string | null;
+  login: string | null;
+  claimed: boolean; // an account with an active grant is claimed — out of the free pool
   status: string;
   creatorId: string | null;
   creatorName: string | null;
@@ -113,6 +184,8 @@ export async function accountsOverview(): Promise<AccountView[]> {
     platform: a.platform,
     handle: a.handle,
     label: a.label,
+    login: a.login,
+    claimed: a.grants.length > 0,
     status: a.status,
     creatorId: a.creatorId,
     creatorName: a.creator?.name ?? null,
