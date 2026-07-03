@@ -113,6 +113,17 @@ export default function CandidateActions({
             <p className="mt-2 text-[11px] text-muted">
               ROLE_SELECTED → training · TRIAL_READY → brief + clock · SUBMITTED → scorer queue
             </p>
+            <button
+              className="btn-primary btn-sm mt-3 w-full"
+              disabled={busy}
+              onClick={() => call(`/api/applications/${primaryApplicationId}/onboard`, {})}
+            >
+              ⚡ Onboard now — hire + auto-hand an account
+            </button>
+            <p className="mt-1.5 text-[11px] text-muted">
+              Skips the trial: creates their VA record, assigns a model, hands them a pool account, and DMs
+              their setup + promo link. Then they show up on the Accounts page.
+            </p>
           </section>
 
           <section className="card p-4">
