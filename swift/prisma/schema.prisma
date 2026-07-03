@@ -300,6 +300,10 @@ model Assignment {
   trackSlug     String?  @unique // short slug behind their promo link; /go/<slug> redirects to the model's OF trial link + logs a click
   trialLinkUrl   String? // the Infloww trial link this VA was assigned from the pool — /go/<slug> redirects here (per-VA sub attribution)
   trialLinkLabel String? // the Infloww label of that link (e.g. "LOLA-R-3") so you can match earnings back to this VA in Infloww
+  lastActiveDay  DateTime? // last day this VA showed activity (a promo click or a message) — drives coaching + streaks
+  activeStreak   Int      @default(0) // consecutive active days right now
+  bestStreak     Int      @default(0) // their personal-best streak (for comeback framing — never shamed to 0)
+  lastCoachedDay DateTime? // last day the coach messaged them, so we never double-nudge in a day
   startDate     DateTime @default(now())
   status        String   @default("probation") // probation | active | ended
   createdAt     DateTime @default(now())
