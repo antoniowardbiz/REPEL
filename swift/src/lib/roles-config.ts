@@ -138,7 +138,7 @@ export const ROLE_PLATFORM: Record<string, "x" | "instagram" | "reddit" | "tikto
 // Pay terms per role — used in the onboarding welcome + AI support answers.
 // Leave a role blank ("") until real terms exist: the message line auto-drops.
 export const ROLE_PAY: Record<string, string> = {
-  reddit_va: "$2/hr · 4 hrs/day · +10% commission on all spend from your subs",
+  reddit_va: "$75 bi-weekly + 10% commission on all spend from your subs — rises after your first two weeks if performance is high",
   x_va: "$75 bi-weekly — rises after your first two weeks if performance is high",
   tiktok_va: "",
   ig_manager: "",

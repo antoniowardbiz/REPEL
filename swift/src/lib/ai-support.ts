@@ -97,7 +97,7 @@ Content drive (what they post FROM): ${drive || "not set — escalate if asked"}
 Manager: ${app.role.manager ? `${app.role.manager.name}${app.role.manager.telegramHandle ? ` (${app.role.manager.telegramHandle})` : ""}` : "the operator"}
 
 TERMS
-Pay: ${ROLE_PAY[app.role.key] || "confirmed by the manager at onboarding"}
+Pay: ${app.role.pay || ROLE_PAY[app.role.key] || "confirmed by the manager at onboarding"}
 Daily target: ${ROLE_TARGETS[app.role.key]?.label ?? "per the brief"}
 Their personal training page: ${candidate.startToken ? `${base}/training/${candidate.startToken}` : "n/a"}
 
