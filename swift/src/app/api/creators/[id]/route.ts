@@ -21,6 +21,8 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
   if (drive !== undefined) data.contentDriveUrl = drive;
   const main = cleanUrl(body.xMainUrl);
   if (main !== undefined) data.xMainUrl = main;
+  const ofTrial = cleanUrl(body.ofTrialUrl);
+  if (ofTrial !== undefined) data.ofTrialUrl = ofTrial;
 
   // Per-role drives: merge onto the existing JSON so unmentioned roles keep theirs.
   if (body.drives && typeof body.drives === "object") {

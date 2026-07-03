@@ -7,6 +7,7 @@ import RoleCapacityEditor from "@/components/RoleCapacityEditor";
 import RolePayEditor from "@/components/RolePayEditor";
 import AssignmentPromoLink from "@/components/AssignmentPromoLink";
 import ModelLinksEditor from "@/components/ModelLinksEditor";
+import PromoBackfillButton from "@/components/PromoBackfillButton";
 
 export const dynamic = "force-dynamic";
 
@@ -47,11 +48,20 @@ export default async function VasPage() {
       id: c.id,
       name: c.name,
       xMainUrl: c.xMainUrl ?? "",
+      ofTrialUrl: c.ofTrialUrl ?? "",
       // Per-role drives, falling back to the general drive so existing links show.
       driveX: drives.x_va ?? c.contentDriveUrl ?? "",
       driveReddit: drives.reddit_va ?? c.contentDriveUrl ?? "",
     };
   });
+
+  // Promo-link clicks per VA (all-time), to show attribution next to each link.
+  const clickAgg = await prisma.activityEvent.groupBy({
+    by: ["userId"],
+    where: { type: "promo_click", userId: { not: null } },
+    _count: { _all: true },
+  });
+  const clicksByUser = new Map(clickAgg.map((c) => [c.userId as string, c._count._all]));
 
   const capacityRows = availability
     .slice()
@@ -198,7 +208,10 @@ export default async function VasPage() {
 
       {/* Assignments */}
       <section className="card p-4">
-        <h2 className="mb-3 font-display text-base font-semibold">Active assignments ({assignments.length})</h2>
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="font-display text-base font-semibold">Active assignments ({assignments.length})</h2>
+          <PromoBackfillButton />
+        </div>
         <div className="overflow-hidden rounded-lg border border-line">
           <table className="w-full text-sm">
             <thead className="bg-panel2 text-muted">
@@ -207,7 +220,8 @@ export default async function VasPage() {
                 <th className="px-3 py-2 text-left font-medium">Role</th>
                 <th className="px-3 py-2 text-left font-medium">Model</th>
                 <th className="px-3 py-2 text-left font-medium">Status</th>
-                <th className="px-3 py-2 text-left font-medium">Their link (Infloww)</th>
+                <th className="px-3 py-2 text-right font-medium">Clicks</th>
+                <th className="px-3 py-2 text-left font-medium">Promo link (auto)</th>
               </tr>
             </thead>
             <tbody>
@@ -219,6 +233,9 @@ export default async function VasPage() {
                   <td className="px-3 py-2">
                     <span className="pill bg-panel2 text-muted">{a.status}</span>
                   </td>
+                  <td className="px-3 py-2 text-right font-mono tabular-nums">
+                    {clicksByUser.get(a.userId) ?? 0}
+                  </td>
                   <td className="px-3 py-2" style={{ minWidth: 220 }}>
                     <AssignmentPromoLink id={a.id} promoLink={a.promoLink ?? ""} />
                   </td>
@@ -226,7 +243,7 @@ export default async function VasPage() {
               ))}
               {assignments.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="px-3 py-4 text-center text-muted">
+                  <td colSpan={6} className="px-3 py-4 text-center text-muted">
                     No assignments yet — VAs are assigned automatically when hired (Onboarding).
                   </td>
                 </tr>

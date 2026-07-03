@@ -755,6 +755,8 @@ Once you're posting, drop your link here with the word SUBMIT 🚀`,
 🎯 Your daily target: {{daily_target}}
 💰 Your pay: {{pay_line}}
 👥 Join your team group: {{group_invite_url}}
+🔗 Your promo link (post THIS to bring subs — it's tracked to you): {{promo_link}}
+{{link_placement}}
 
 🔑 Your account lands in the very next message — log in from your own device and you're ready to go.
 
