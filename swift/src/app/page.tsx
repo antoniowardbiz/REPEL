@@ -3,11 +3,13 @@ import { BOARD_STAGES, Stage, Tier } from "@/lib/constants";
 import { timeAgo, deadlineLabel } from "@/lib/ui";
 import Board, { BoardCard } from "@/components/Board";
 import ClearPipelineButton from "@/components/ClearPipelineButton";
+import OpsFlagsPanel from "@/components/OpsFlagsPanel";
+import { openFlags } from "@/lib/signals";
 
 export const dynamic = "force-dynamic";
 
 export default async function PipelinePage() {
-  const [applications, looseCandidates, roles] = await Promise.all([
+  const [applications, looseCandidates, roles, flags] = await Promise.all([
     prisma.application.findMany({
       where: { stage: { in: BOARD_STAGES as string[] } },
       include: {
@@ -23,6 +25,7 @@ export default async function PipelinePage() {
       orderBy: { createdAt: "asc" },
     }),
     prisma.role.findMany({ where: { active: true }, orderBy: { displayName: "asc" } }),
+    openFlags(),
   ]);
 
   const cards: BoardCard[] = [];
@@ -78,6 +81,11 @@ export default async function PipelinePage() {
         </div>
         <ClearPipelineButton />
       </div>
+      {flags.length > 0 && (
+        <div className="mb-5">
+          <OpsFlagsPanel flags={flags} />
+        </div>
+      )}
       <Board cards={cards} roleOptions={roleOptions} />
     </div>
   );

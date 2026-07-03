@@ -115,6 +115,27 @@ model Candidate {
   groupMemberships GroupMembership[]
   activityEvents   ActivityEvent[]
   quizAttempts     QuizAttempt[]
+  opsFlags         OpsFlag[]
+}
+
+// A "needs attention" flag raised when a VA tells the bot something's wrong —
+// they've run low on content, or their account looks banned/suspended. Surfaced
+// on the dashboard so nothing slips, and resolved once you've handled it.
+model OpsFlag {
+  id           String    @id @default(cuid())
+  kind         String // content_low | account_issue
+  candidateId  String
+  assignmentId String?
+  creatorId    String?
+  platform     String?
+  note         String? // a snippet of what the VA said
+  status       String    @default("open") // open | resolved
+  createdAt    DateTime  @default(now())
+  resolvedAt   DateTime?
+
+  candidate Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+
+  @@index([status, kind])
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
