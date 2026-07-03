@@ -5,6 +5,7 @@ import { sendOpsAlert, sendTelegramMessage } from "@/lib/telegram";
 import { ROLE_PLATFORM } from "@/lib/roles-config";
 import { handleCandidateMessage } from "@/lib/ai-support";
 import { totp, totpSecondsRemaining, parse2FASecret } from "@/lib/totp";
+import { classifyVaSignal, raiseVaFlag } from "@/lib/signals";
 
 // POST /api/telegram/webhook?secret=... — inbound Telegram updates.
 //
@@ -297,6 +298,19 @@ export async function POST(req: Request) {
         );
       }
       handled = true;
+    }
+
+    // ── VA trouble signals: content run out / account banned ─────────────────
+    // Catch "I'm out of content" or "my account got banned" BEFORE the general
+    // AI so it becomes a visible flag on the dashboard + an ops alert, not just
+    // a chat reply that's forgotten.
+    if (!handled && text && text.trim().length > 0) {
+      const sig = classifyVaSignal(text);
+      if (sig) {
+        const { reply } = await raiseVaFlag(candidate.id, sig, text);
+        await replyAndLog(candidate.id, chatId, reply, `flag_${sig}`);
+        handled = true;
+      }
     }
 
     // ── AI support: answer everything else, 24/7 ─────────────────────────────
