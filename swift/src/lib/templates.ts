@@ -17,6 +17,7 @@ export type MergeContext = {
   daily_target?: string | null;
   pay_line?: string | null;
   group_invite_url?: string | null;
+  promo_link?: string | null; // this VA's own Infloww OF tracking link
   role_name?: string | null;
   [k: string]: string | number | null | undefined;
 };
