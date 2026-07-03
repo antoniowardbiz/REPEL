@@ -7,6 +7,7 @@ export type ModelRow = {
   id: string;
   name: string;
   xMainUrl: string;
+  ofTrialUrl: string; // free-trial OF link — VAs' personal promo links redirect here
   driveX: string; // x_va content drive
   driveReddit: string; // reddit_va content drive
 };
@@ -30,12 +31,16 @@ function Row({ model }: { model: ModelRow }) {
   const [driveX, setDriveX] = useState(model.driveX);
   const [driveReddit, setDriveReddit] = useState(model.driveReddit);
   const [main, setMain] = useState(model.xMainUrl);
+  const [ofTrial, setOfTrial] = useState(model.ofTrialUrl);
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const dirty =
-    driveX !== model.driveX || driveReddit !== model.driveReddit || main !== model.xMainUrl;
+    driveX !== model.driveX ||
+    driveReddit !== model.driveReddit ||
+    main !== model.xMainUrl ||
+    ofTrial !== model.ofTrialUrl;
 
   async function save() {
     setBusy(true);
@@ -46,6 +51,7 @@ function Row({ model }: { model: ModelRow }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           xMainUrl: main,
+          ofTrialUrl: ofTrial,
           drives: { x_va: driveX, reddit_va: driveReddit },
         }),
       });
@@ -98,6 +104,15 @@ function Row({ model }: { model: ModelRow }) {
             onChange={(e) => setMain(e.target.value)}
           />
         </div>
+      </div>
+      <div className="mt-2">
+        <label className="label">OF free-trial link (VAs&apos; promo links point here)</label>
+        <input
+          className="input font-mono text-[12px]"
+          placeholder="https://onlyfans.com/action/trial/… (7-day, no limits)"
+          value={ofTrial}
+          onChange={(e) => setOfTrial(e.target.value)}
+        />
       </div>
       {(!driveX || !driveReddit) && (
         <p className="mt-2 text-xs text-warn">

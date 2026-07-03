@@ -11,9 +11,10 @@ import type { NextRequest } from "next/server";
 //   /training/*, /api/training/* — candidate training + quiz (token-gated)
 //   /api/telegram/*              — Telegram webhook (secret-gated)
 //   /api/cron/*                  — scheduled jobs (CRON_SECRET-gated)
+//   /go/*                        — VAs' public promo links (subs click them)
 // When on, the browser shows a native username/password box — enter anything as
 // the username and DASHBOARD_PASSWORD as the password.
-const PUBLIC_PREFIXES = ["/apply", "/api/apply", "/training", "/api/training", "/playbook", "/api/telegram", "/api/cron"];
+const PUBLIC_PREFIXES = ["/apply", "/api/apply", "/training", "/api/training", "/playbook", "/go", "/api/telegram", "/api/cron"];
 
 function isPublic(pathname: string): boolean {
   return PUBLIC_PREFIXES.some((p) => pathname === p || pathname.startsWith(p + "/"));

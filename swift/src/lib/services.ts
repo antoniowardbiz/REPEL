@@ -106,6 +106,17 @@ async function buildMergeContext(applicationId: string, extra?: Partial<MergeCon
     /* keep fallback */
   }
 
+  // Where the VA must put their promo link, per platform — drilled in from day
+  // one so no reach is wasted. X wants it in the bio AND every post's comments;
+  // Reddit funnels through the bio (post bodies strip external links).
+  const platform = ROLE_PLATFORM[app.role.key];
+  const linkPlacement =
+    platform === "x"
+      ? `📍 Put your link in your X bio AND drop it in the comments of EVERY post — that's how fans find it.`
+      : platform === "reddit"
+        ? `📍 Put your link in your Reddit bio so it sits on every post you make.`
+        : `📍 Keep your link in your bio so fans can always find it.`;
+
   const manager = app.role.manager;
   const managerLabel = manager
     ? manager.telegramHandle
@@ -138,6 +149,7 @@ async function buildMergeContext(applicationId: string, extra?: Partial<MergeCon
       : "",
     group_invite_url: groupInvite || app.role.trainingGroupUrl || "",
     promo_link: assignment?.promoLink ?? "", // this VA's own Infloww OF tracking link (set at hire)
+    link_placement: assignment ? linkPlacement : "", // only once hired (they have a link to place)
     ...extra,
   };
 }
@@ -565,6 +577,45 @@ async function handOutAccount(
   await sendOpsAlert(`🔑 ${app.candidate.fullName} was auto-handed ${platform}/${acct.handle} — ${left} left in the pool.`);
 }
 
+/** Slug-safe first name for the promo link (e.g. "Ryan" → "ryan"). */
+function promoSlugify(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]+/g, "").slice(0, 16) || "va";
+}
+
+/**
+ * Give this assignment a personal promo link (/go/<slug>) exactly once, so it can
+ * be DM'd to the VA and every click is tracked to them. Idempotent — an existing
+ * slug is kept. The slug ends in the assignment id suffix so it's always unique.
+ */
+export async function ensurePromoLink(assignmentId: string, firstName: string) {
+  const asg = await prisma.assignment.findUnique({ where: { id: assignmentId } });
+  if (!asg || asg.trackSlug) return;
+  const slug = `${promoSlugify(firstName)}${asg.id.slice(-6)}`;
+  const base = (process.env.NEXT_PUBLIC_BASE_URL || "").replace(/\/$/, "");
+  await prisma.assignment.update({
+    where: { id: assignmentId },
+    data: { trackSlug: slug, promoLink: base ? `${base}/go/${slug}` : "" },
+  });
+}
+
+/**
+ * Generate a personal promo link for every current VA that's missing one — so
+ * VAs hired before this feature (or before their model's OF link was set) get
+ * theirs in one click. Idempotent: VAs who already have a slug are skipped.
+ */
+export async function backfillPromoLinks(): Promise<{ generated: number; total: number }> {
+  const assignments = await prisma.assignment.findMany({
+    where: { status: { in: ["probation", "active"] }, trackSlug: null },
+    include: { user: true },
+  });
+  let generated = 0;
+  for (const a of assignments) {
+    await ensurePromoLink(a.id, firstNameOf(a.user.name || "VA")).catch(() => {});
+    generated++;
+  }
+  return { generated, total: assignments.length };
+}
+
 /**
  * Onboard a candidate all the way to ACTIVE and auto-hand them a pool account —
  * fully hands-off so VAs get started without the operator present. Shared by the
@@ -597,6 +648,8 @@ export async function onboardAndActivate(applicationId: string, actorUserId?: st
       await auditLog("hire_needs_model", "Application", applicationId, {}, actorUserId);
       return;
     }
+    // Generate their personal, tracked promo link BEFORE the welcome so it renders.
+    await ensurePromoLink(assigned.id, firstNameOf(app.candidate.fullName)).catch(() => {});
     await sendTemplatedMessage(applicationId, "offer");
     await moveStage(applicationId, "ACTIVE", actorUserId);
     // Full setup message — model, drive, target, pay, group, manager. Sent after
@@ -606,9 +659,22 @@ export async function onboardAndActivate(applicationId: string, actorUserId?: st
     await handOutAccount(app, assigned.creatorId).catch(() => {});
     await auditLog("auto_hired", "Application", applicationId, {}, actorUserId);
     const mgr = app.role.manager;
+    // Manager handoff packet — the model + content folder + promo link nailed
+    // down BEFORE the VA is left to their manager (Reddit → Haria), so nobody
+    // picks up a VA who doesn't know their model or has nothing to post.
+    const ctx = await buildMergeContext(applicationId);
+    if (!ctx.content_drive_url) {
+      await sendOpsAlert(
+        `⚠ ${app.candidate.fullName} was onboarded for ${app.role.displayName} on ${ctx.model_name}, but that model has NO ${app.role.displayName} content folder set. Add it on /vas so they know what to post before ${mgr?.name ?? "their manager"} takes over.`
+      );
+    }
+    const mgrRef = mgr ? `${mgr.name}${mgr.telegramHandle ? ` (${mgr.telegramHandle})` : ""}` : "their manager";
     await sendOpsAlert(
-      `✅ Onboarded ${app.candidate.fullName} — ${app.role.displayName}` +
-        (mgr ? ` → coached by ${mgr.name}${mgr.telegramHandle ? ` (${mgr.telegramHandle})` : ""}` : "")
+      `✅ New ${app.role.displayName} — hand off to ${mgrRef}\n` +
+        `• VA: ${app.candidate.fullName}\n` +
+        `• Model: ${ctx.model_name}\n` +
+        `• Content folder: ${ctx.content_drive_url || "⚠ NOT SET"}\n` +
+        `• Their promo link: ${ctx.promo_link || "—"}`
     );
   } catch (e: any) {
     await sendOpsAlert(

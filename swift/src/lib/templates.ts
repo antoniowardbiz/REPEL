@@ -18,6 +18,7 @@ export type MergeContext = {
   pay_line?: string | null;
   group_invite_url?: string | null;
   promo_link?: string | null; // this VA's own Infloww OF tracking link
+  link_placement?: string | null; // where to put the promo link (per platform: X bio+comments / Reddit bio)
   role_name?: string | null;
   [k: string]: string | number | null | undefined;
 };

@@ -31,6 +31,7 @@ model Creator {
   tiktokHandle    String?
   contentDriveUrl String? // general/fallback drive
   contentDrives   String? // JSON {roleKey: driveUrl} — per-role drives (e.g. x_va vs reddit_va content)
+  ofTrialUrl      String? // the model's free-trial OF link (7-day, no limits) — VAs' personal promo links redirect here
   active          Boolean  @default(true)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
@@ -294,7 +295,8 @@ model Assignment {
   creatorId     String
   roleId        String
   managerUserId String?
-  promoLink     String? // this VA's own OF tracking link (pulled from Infloww) — assigned at hire so subs are attributed to them
+  promoLink     String? // this VA's personal promo link (the /go/<slug> redirect) — auto-generated at hire, tracked to them
+  trackSlug     String?  @unique // short slug behind their promo link; /go/<slug> redirects to the model's OF trial link + logs a click
   startDate     DateTime @default(now())
   status        String   @default("probation") // probation | active | ended
   createdAt     DateTime @default(now())
