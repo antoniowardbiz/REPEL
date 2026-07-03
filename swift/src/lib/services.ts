@@ -613,6 +613,52 @@ export async function onboardAndActivate(applicationId: string, actorUserId?: st
   }
 }
 
+/**
+ * DM a VA the login for an account they hold — used when an account is granted
+ * MANUALLY on the Accounts page. (The auto-handout DMs it on hire; a manual grant
+ * previously didn't, leaving the VA with an account they couldn't open.) Returns
+ * why it couldn't send so the grant response can surface it.
+ */
+export async function deliverAccountLogin(
+  accountId: string,
+  userId: string
+): Promise<{ sent: boolean; reason?: string }> {
+  const account = await prisma.account.findUnique({ where: { id: accountId } });
+  if (!account?.login) return { sent: false, reason: "no login is stored on this account" };
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  if (!user?.candidateId) return { sent: false, reason: "this VA has no linked candidate/chat" };
+  const candidate = await prisma.candidate.findUnique({ where: { id: user.candidateId } });
+  if (!candidate?.telegramChatId)
+    return { sent: false, reason: "this VA never messaged the bot, so there's no chat to DM" };
+
+  const asg = await prisma.assignment.findFirst({
+    where: { userId, status: { in: ["probation", "active"] } },
+    orderBy: { createdAt: "desc" },
+    include: { role: { include: { manager: true } } },
+  });
+  const platform = account.platform;
+  const platformLabel = platform === "x" ? "X (Twitter)" : platform === "reddit" ? "Reddit" : platform;
+  const isReddit = platform === "reddit" || asg?.role.key === "reddit_va";
+  const safety = isReddit
+    ? "Warm it a couple of days (join subs, upvote, a few comments) before posting NSFW"
+    : "Mark the account 'sensitive' in settings, then warm it a day or two before hard posting";
+  const mgr = asg?.role.manager;
+  const mgrRef = mgr ? `${mgr.name}${mgr.telegramHandle ? ` (${mgr.telegramHandle})` : ""}` : "Your manager";
+  const body =
+    `🔑 Your ${platformLabel} account is ready — log in from your OWN phone/computer:\n\n` +
+    `${account.login}\n\n` +
+    `Do this first:\n` +
+    `1. Log in and CHANGE the password\n` +
+    `2. ${safety}\n` +
+    `3. This account is yours alone — keep the login safe, never share it\n\n` +
+    `${mgrRef} will coach you from here 💪`;
+  const r = await sendTelegramMessage(candidate.telegramChatId, body);
+  await prisma.message.create({
+    data: { candidateId: candidate.id, direction: "outbound", channel: "telegram", templateKey: "account_handout", body, status: r.status },
+  });
+  return { sent: true };
+}
+
 export async function submitTrial(
   applicationId: string,
   submissionUrls: string[],
