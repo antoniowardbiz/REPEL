@@ -15,6 +15,7 @@ import { assignVa } from "./distribution";
 import { resolveOpenRoleId } from "./capacity";
 import { ROLE_PAY, ROLE_TARGETS, ROLE_TRIAL_CONTENT, ROLE_PLATFORM } from "./roles-config";
 import { claimNextAccount } from "./accounts";
+import { claimTrialLink } from "./trial-links";
 import { PLAYBOOKS } from "./playbooks-config";
 import { randomBytes } from "crypto";
 
@@ -603,17 +604,29 @@ export async function ensurePromoLink(assignmentId: string, firstName: string) {
  * VAs hired before this feature (or before their model's OF link was set) get
  * theirs in one click. Idempotent: VAs who already have a slug are skipped.
  */
-export async function backfillPromoLinks(): Promise<{ generated: number; total: number }> {
-  const assignments = await prisma.assignment.findMany({
+export async function backfillPromoLinks(): Promise<{ generated: number; total: number; trialLinksAssigned: number }> {
+  // 1) Give a /go promo link to anyone missing one.
+  const missingSlug = await prisma.assignment.findMany({
     where: { status: { in: ["probation", "active"] }, trackSlug: null },
     include: { user: true },
   });
   let generated = 0;
-  for (const a of assignments) {
+  for (const a of missingSlug) {
     await ensurePromoLink(a.id, firstNameOf(a.user.name || "VA")).catch(() => {});
     generated++;
   }
-  return { generated, total: assignments.length };
+  // 2) Claim an Infloww trial link from the pool for anyone missing one (covers
+  //    VAs hired before the pool was stocked). Matches their model + platform.
+  const missingTrialLink = await prisma.assignment.findMany({
+    where: { status: { in: ["probation", "active"] }, trialLinkUrl: null },
+    select: { id: true },
+  });
+  let trialLinksAssigned = 0;
+  for (const a of missingTrialLink) {
+    const r = await claimTrialLink(a.id).catch(() => ({ claimed: false }));
+    if (r.claimed) trialLinksAssigned++;
+  }
+  return { generated, total: missingSlug.length, trialLinksAssigned };
 }
 
 /**
@@ -650,6 +663,9 @@ export async function onboardAndActivate(applicationId: string, actorUserId?: st
     }
     // Generate their personal, tracked promo link BEFORE the welcome so it renders.
     await ensurePromoLink(assigned.id, firstNameOf(app.candidate.fullName)).catch(() => {});
+    // Claim their own Infloww trial link from the pool (per-VA sub attribution).
+    // Their /go link then redirects here; falls back to the model's shared link.
+    await claimTrialLink(assigned.id).catch(() => {});
     await sendTemplatedMessage(applicationId, "offer");
     await moveStage(applicationId, "ACTIVE", actorUserId);
     // Full setup message — model, drive, target, pay, group, manager. Sent after
