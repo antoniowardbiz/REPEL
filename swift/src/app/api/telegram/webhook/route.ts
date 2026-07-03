@@ -4,6 +4,7 @@ import { submitTrial, deliverStageMessage, routeToManagerForAccount, selectRole 
 import { sendOpsAlert, sendTelegramMessage } from "@/lib/telegram";
 import { ROLE_PLATFORM } from "@/lib/roles-config";
 import { handleCandidateMessage } from "@/lib/ai-support";
+import { totp, totpSecondsRemaining, parse2FASecret } from "@/lib/totp";
 
 // POST /api/telegram/webhook?secret=... — inbound Telegram updates.
 //
@@ -262,6 +263,40 @@ export async function POST(req: Request) {
           handled = true;
         }
       }
+    }
+
+    // ── 2FA login code: a hired VA asking for their account's authenticator code
+    // They message "code" / "2fa" / "otp" and the bot generates the current TOTP
+    // for the account they hold and replies with it — no authenticator app on
+    // their end. (Same automation as the outreach side of the business.)
+    if (!handled && text && /^\/?(code|2fa|otp|login\s*code)\b/i.test(text.trim())) {
+      const user = await prisma.user.findFirst({ where: { candidateId: candidate.id } });
+      const grant = user
+        ? await prisma.accessGrant.findFirst({
+            where: { userId: user.id, status: "active", account: { login: { not: null } } },
+            orderBy: { grantedAt: "desc" },
+            include: { account: true },
+          })
+        : null;
+      const secret = parse2FASecret(grant?.account.login);
+      if (secret) {
+        const code = totp(secret);
+        const left = totpSecondsRemaining();
+        await replyAndLog(
+          candidate.id,
+          chatId,
+          `🔐 Your login code: ${code}\n(good for ~${left}s — if it expires just message "code" again)`,
+          "twofa_code"
+        );
+      } else {
+        await replyAndLog(
+          candidate.id,
+          chatId,
+          `I don't have a login code on file for your account yet — your manager will sort it 🙏`,
+          "twofa_none"
+        );
+      }
+      handled = true;
     }
 
     // ── AI support: answer everything else, 24/7 ─────────────────────────────
