@@ -11,15 +11,18 @@ import { runDueWatches } from "./watcher";
 import { runDeadlineChecks } from "./deadlines";
 import { runStaleSweep } from "./stale";
 import { sendDailyDigest, sendMorningMessages } from "./daily";
+import { runDailyCoaching } from "./coaching";
 
 const g = globalThis as unknown as { __swiftSchedulerStarted?: boolean };
 
 const MORNING_HOUR = Number(process.env.MORNING_HOUR ?? 8);
 const DIGEST_HOUR = Number(process.env.DIGEST_HOUR ?? 21);
+const COACH_HOUR = Number(process.env.COACH_HOUR ?? 20); // proactive VA coaching, once/day
 const TZ_OFFSET = Number(process.env.TZ_OFFSET ?? 0);
 
 let lastMorningDay = "";
 let lastDigestDay = "";
+let lastCoachDay = "";
 
 function local() {
   return new Date(Date.now() + TZ_OFFSET * 3600_000);
@@ -57,6 +60,10 @@ export function startScheduler() {
         if (h === DIGEST_HOUR && lastDigestDay !== day) {
           lastDigestDay = day;
           await sendDailyDigest();
+        }
+        if (h === COACH_HOUR && lastCoachDay !== day) {
+          lastCoachDay = day;
+          await runDailyCoaching();
         }
       }),
     15 * 60_000
