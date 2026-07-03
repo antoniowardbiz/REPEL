@@ -136,6 +136,7 @@ async function buildMergeContext(applicationId: string, extra?: Partial<MergeCon
       ? `${(process.env.NEXT_PUBLIC_BASE_URL || "").replace(/\/$/, "")}/playbook/${app.role.key}`
       : "",
     group_invite_url: groupInvite || app.role.trainingGroupUrl || "",
+    promo_link: assignment?.promoLink ?? "", // this VA's own Infloww OF tracking link (set at hire)
     ...extra,
   };
 }

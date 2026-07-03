@@ -294,6 +294,7 @@ model Assignment {
   creatorId     String
   roleId        String
   managerUserId String?
+  promoLink     String? // this VA's own OF tracking link (pulled from Infloww) — assigned at hire so subs are attributed to them
   startDate     DateTime @default(now())
   status        String   @default("probation") // probation | active | ended
   createdAt     DateTime @default(now())

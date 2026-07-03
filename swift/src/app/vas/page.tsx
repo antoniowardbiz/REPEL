@@ -5,6 +5,7 @@ import { AUTO_HIRE } from "@/lib/services";
 import { ROLE_PAY } from "@/lib/roles-config";
 import RoleCapacityEditor from "@/components/RoleCapacityEditor";
 import RolePayEditor from "@/components/RolePayEditor";
+import AssignmentPromoLink from "@/components/AssignmentPromoLink";
 import ModelLinksEditor from "@/components/ModelLinksEditor";
 
 export const dynamic = "force-dynamic";
@@ -206,6 +207,7 @@ export default async function VasPage() {
                 <th className="px-3 py-2 text-left font-medium">Role</th>
                 <th className="px-3 py-2 text-left font-medium">Model</th>
                 <th className="px-3 py-2 text-left font-medium">Status</th>
+                <th className="px-3 py-2 text-left font-medium">Their link (Infloww)</th>
               </tr>
             </thead>
             <tbody>
@@ -217,11 +219,14 @@ export default async function VasPage() {
                   <td className="px-3 py-2">
                     <span className="pill bg-panel2 text-muted">{a.status}</span>
                   </td>
+                  <td className="px-3 py-2" style={{ minWidth: 220 }}>
+                    <AssignmentPromoLink id={a.id} promoLink={a.promoLink ?? ""} />
+                  </td>
                 </tr>
               ))}
               {assignments.length === 0 && (
                 <tr>
-                  <td colSpan={4} className="px-3 py-4 text-center text-muted">
+                  <td colSpan={5} className="px-3 py-4 text-center text-muted">
                     No assignments yet — VAs are assigned automatically when hired (Onboarding).
                   </td>
                 </tr>
