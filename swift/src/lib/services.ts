@@ -13,7 +13,8 @@ import { routeToFolderForStage } from "./folders";
 import { ensureTrialWatch } from "./watcher";
 import { assignVa } from "./distribution";
 import { resolveOpenRoleId } from "./capacity";
-import { ROLE_PAY, ROLE_TARGETS, ROLE_TRIAL_CONTENT, ACCOUNT_MANAGED_ROLES } from "./roles-config";
+import { ROLE_PAY, ROLE_TARGETS, ROLE_TRIAL_CONTENT, ROLE_PLATFORM } from "./roles-config";
+import { claimNextAccount } from "./accounts";
 import { PLAYBOOKS } from "./playbooks-config";
 import { randomBytes } from "crypto";
 
@@ -286,25 +287,13 @@ export async function moveStage(applicationId: string, to: Stage, actorUserId?: 
   }
 
   if (automation?.kind === "create_trial_and_brief") {
-    const role = app.role;
-    // Account-managed roles (Reddit → Haria) need an account FIRST: ask the simple
-    // account question before the clock, then route to the manager to set one up +
-    // warm it so nothing is banned. Every other role — including X, which also has
-    // a manager (@swiftxvas) purely as its contact — uses any account, so it goes
-    // straight to the self-serve trial brief.
-    if (role.managerUserId && ACCOUNT_MANAGED_ROLES.includes(role.key)) {
-      let trial = app.trials.find((t) => t.status === "not_started") ?? null;
-      if (!trial) {
-        trial = await prisma.trial.create({ data: { applicationId, creatorId: role.defaultCreatorId, status: "account_check" } });
-      } else {
-        trial = await prisma.trial.update({ where: { id: trial.id }, data: { status: "account_check" } });
-      }
-      const r = await sendTemplatedMessage(applicationId, "account_check");
-      if (!r.skipped) effects.push(`account check ${r.sendStatus}`);
-    } else {
-      const r = await startTrial(applicationId);
-      effects.push(...r.effects);
-    }
+    // Everyone who reaches TRIAL_READY runs a short self-serve trial on any
+    // account of their own — it proves they understand the SOP. (Account-managed
+    // roles like Reddit no longer reach here: they onboard straight off the quiz
+    // and are auto-handed a pool account.) Passing the trial → auto-hire → the
+    // system hands them their own pool account.
+    const r = await startTrial(applicationId);
+    effects.push(...r.effects);
   }
 
   if (automation?.kind === "queue_for_scoring") {
@@ -510,6 +499,120 @@ export async function routeToManagerForAccount(applicationId: string, hasAccount
 
 // ── Trial submission ─────────────────────────────────────────────────────────
 
+/**
+ * Auto-hand a free pool account to a fresh hire and DM them the login. Claims
+ * the oldest un-claimed account matching their platform + assigned model, which
+ * drops it from the pool so it's never handed twice. Notifies ops on every claim
+ * (→ @swiftofmm) and alerts loudly when the pool is empty. Non-fatal by design —
+ * a hire never fails because the pool is dry.
+ */
+async function handOutAccount(
+  app: {
+    id: string;
+    candidateId: string;
+    candidate: { fullName: string; telegramChatId: string | null };
+    role: { key: string; manager: { name: string; telegramHandle: string | null } | null };
+  },
+  creatorId: string
+) {
+  const platform = ROLE_PLATFORM[app.role.key];
+  if (!platform) return;
+  const user = await prisma.user.findFirst({ where: { candidateId: app.candidateId } });
+  if (!user) return;
+
+  const acct = await claimNextAccount({ platform, creatorId, userId: user.id });
+  if (!acct) {
+    await sendOpsAlert(
+      `⚠ ${app.candidate.fullName} was onboarded for ${platform} but the ACCOUNT POOL IS EMPTY — hand one over manually and top up the pool.`
+    );
+    return;
+  }
+
+  const platformLabel = platform === "x" ? "X (Twitter)" : platform === "reddit" ? "Reddit" : platform;
+  const safety =
+    app.role.key === "reddit_va"
+      ? "Warm it a couple of days (join subs, upvote, a few comments) before posting NSFW"
+      : "Mark the account 'sensitive' in settings, then warm it a day or two before hard posting";
+  const mgr = app.role.manager;
+  const mgrRef = mgr ? `${mgr.name}${mgr.telegramHandle ? ` (${mgr.telegramHandle})` : ""}` : "Your manager";
+  const body =
+    `🔑 Your ${platformLabel} account is ready — log in from your OWN phone/computer:\n\n` +
+    `${acct.login}\n\n` +
+    `Do this first:\n` +
+    `1. Log in and CHANGE the password\n` +
+    `2. ${safety}\n` +
+    `3. Keep this login safe — never share it\n\n` +
+    `${mgrRef} will coach you from here 💪`;
+  const r = await sendTelegramMessage(app.candidate.telegramChatId, body);
+  await prisma.message.create({
+    data: {
+      candidateId: app.candidateId,
+      applicationId: app.id,
+      direction: "outbound",
+      channel: "telegram",
+      templateKey: "account_handout",
+      body,
+      status: r.status,
+    },
+  });
+  const left = await prisma.account.count({
+    where: { platform, login: { not: null }, status: { in: ["warming", "active"] }, grants: { none: { status: "active" } } },
+  });
+  await sendOpsAlert(`🔑 ${app.candidate.fullName} was auto-handed ${platform}/${acct.handle} — ${left} left in the pool.`);
+}
+
+/**
+ * Onboard a candidate all the way to ACTIVE and auto-hand them a pool account —
+ * fully hands-off so VAs get started without the operator present. Shared by the
+ * X path (after they SUBMIT their trial) and the Reddit path (straight after the
+ * quiz — no trial). Creates the User + model assignment, sends the offer + full
+ * welcome, then claims + DMs an account. Parks + alerts if no model is available.
+ */
+export async function onboardAndActivate(applicationId: string, actorUserId?: string) {
+  const app = await prisma.application.findUnique({
+    where: { id: applicationId },
+    include: { candidate: true, role: { include: { manager: true } } },
+  });
+  if (!app) throw new Error("application not found");
+  try {
+    await moveStage(applicationId, "ONBOARDING", actorUserId); // creates User + auto-assigns a model
+    // Never complete to ACTIVE with no model FOR THIS ROLE — that's a hired-but-
+    // orphaned VA. Park at ONBOARDING + hard-alert so a model is assigned by hand.
+    const assigned = await prisma.assignment.findFirst({
+      where: { user: { candidateId: app.candidateId }, roleId: app.roleId, status: { in: ["probation", "active"] } },
+    });
+    if (!assigned) {
+      const hold = `Great news — you're through ✅ We're finalising your setup and your manager will confirm your model + details shortly. Hang tight! 🙌`;
+      const hr = await sendTelegramMessage(app.candidate.telegramChatId, hold);
+      await prisma.message.create({
+        data: { candidateId: app.candidateId, applicationId, direction: "outbound", channel: "telegram", templateKey: "hire_holding", body: hold, status: hr.status },
+      });
+      await sendOpsAlert(
+        `⚠ ${app.candidate.fullName} onboarded but NO model was assigned for ${app.roleId} (no active model?). Parked — assign a model to finish.`
+      );
+      await auditLog("hire_needs_model", "Application", applicationId, {}, actorUserId);
+      return;
+    }
+    await sendTemplatedMessage(applicationId, "offer");
+    await moveStage(applicationId, "ACTIVE", actorUserId);
+    // Full setup message — model, drive, target, pay, group, manager. Sent after
+    // ONBOARDING so the merge context sees the real assignment.
+    await sendTemplatedMessage(applicationId, "onboarding");
+    // Auto-hand them a pool account + DM the login (the "given an account" step).
+    await handOutAccount(app, assigned.creatorId).catch(() => {});
+    await auditLog("auto_hired", "Application", applicationId, {}, actorUserId);
+    const mgr = app.role.manager;
+    await sendOpsAlert(
+      `✅ Onboarded ${app.candidate.fullName} — ${app.role.displayName}` +
+        (mgr ? ` → coached by ${mgr.name}${mgr.telegramHandle ? ` (${mgr.telegramHandle})` : ""}` : "")
+    );
+  } catch (e: any) {
+    await sendOpsAlert(
+      `⚠ Onboarding hit a snag for application ${applicationId} (${e?.message ?? "unknown"}). Finish onboarding manually.`
+    );
+  }
+}
+
 export async function submitTrial(
   applicationId: string,
   submissionUrls: string[],
@@ -562,65 +665,10 @@ export async function submitTrial(
 
   await moveStage(applicationId, "SUBMITTED", actorUserId);
 
-  // Mass-hire: submitting the trial IS the hire. Onboard immediately, send the
-  // offer, and go ACTIVE — regardless of score. Scoring still happens (for
-  // training triage) but is no longer a gate. Never let a hiccup here block the
-  // record of the submission.
-  if (AUTO_HIRE) {
-    try {
-      await moveStage(applicationId, "ONBOARDING", actorUserId); // creates User + auto-assigns a model
-      // Don't complete to ACTIVE if no model could be assigned FOR THIS ROLE —
-      // that would be a hired-but-orphaned VA (no model, drive or group). Scope
-      // the check to app.roleId (mirroring onboardHire) so a stale assignment
-      // from a DIFFERENT role can't mask a missing one here. Park at ONBOARDING
-      // and hard-alert so a model is assigned manually.
-      const assigned = await prisma.assignment.findFirst({
-        where: { user: { candidateId: app.candidateId }, roleId: app.roleId, status: { in: ["probation", "active"] } },
-      });
-      if (!assigned) {
-        const cand2 = await prisma.candidate.findUnique({ where: { id: app.candidateId } });
-        // Acknowledge the candidate so a hired-but-unassigned VA isn't left in
-        // total silence while ops finishes the assignment manually.
-        const hold =
-          `Great work — your trial's in ✅ We're finalising your setup now and your manager will confirm your model + details shortly. Hang tight! 🙌`;
-        const hr = await sendTelegramMessage(cand2?.telegramChatId ?? null, hold);
-        await prisma.message.create({
-          data: {
-            candidateId: app.candidateId,
-            applicationId,
-            direction: "outbound",
-            channel: "telegram",
-            templateKey: "hire_holding",
-            body: hold,
-            status: hr.status,
-          },
-        });
-        await sendOpsAlert(
-          `⚠ ${cand2?.fullName ?? app.candidateId} submitted + onboarded but NO model was assigned for ${app.roleId} (no active model?). ` +
-            `Parked at ONBOARDING — assign a model to finish the hire.`
-        );
-        await auditLog("hire_needs_model", "Application", applicationId, {}, actorUserId);
-        return trial;
-      }
-      await sendTemplatedMessage(applicationId, "offer");
-      await moveStage(applicationId, "ACTIVE", actorUserId);
-      // Full setup message — their model, drive, daily target, pay, group. Sent
-      // after ONBOARDING so the merge context sees the real assignment.
-      await sendTemplatedMessage(applicationId, "onboarding");
-      await auditLog("auto_hired", "Application", applicationId, { reason: "mass_hire_on_submit" }, actorUserId);
-      const cand = await prisma.candidate.findUnique({ where: { id: app.candidateId } });
-      const roleFull = await prisma.role.findUnique({ where: { id: app.roleId }, include: { manager: true } });
-      const mgr = roleFull?.manager;
-      await sendOpsAlert(
-        `✅ Auto-hired ${cand?.fullName ?? app.candidateId} — ${roleFull?.displayName ?? "VA"}` +
-          (mgr ? ` → hand off to ${mgr.name}${mgr.telegramHandle ? ` (${mgr.telegramHandle})` : ""}` : "")
-      );
-    } catch (e: any) {
-      await sendOpsAlert(
-        `⚠ Auto-hire hit a snag for application ${applicationId} (${e?.message ?? "unknown"}). They submitted — finish onboarding manually.`
-      );
-    }
-  }
+  // Mass-hire: submitting the trial IS the hire. Onboard → ACTIVE → auto-hand a
+  // pool account, regardless of score (scoring still records for training
+  // triage, but never gates). Fully hands-off via the shared onboard path.
+  if (AUTO_HIRE) await onboardAndActivate(applicationId, actorUserId);
 
   return trial;
 }
