@@ -535,14 +535,18 @@ async function handOutAccount(
       : "Mark the account 'sensitive' in settings, then warm it a day or two before hard posting";
   const mgr = app.role.manager;
   const mgrRef = mgr ? `${mgr.name}${mgr.telegramHandle ? ` (${mgr.telegramHandle})` : ""}` : "Your manager";
+  // Only the VA-facing fields (username + password). Email/tokens/2FA-secret stay
+  // with the operator for recovery — the VA gets 2FA codes by messaging "code".
+  const [uname, pass] = (acct.login ?? "").split(":");
   const body =
     `🔑 Your ${platformLabel} account is ready — log in from your OWN phone/computer:\n\n` +
-    `${acct.login}\n\n` +
+    `Username: ${uname}\n` +
+    `Password: ${pass ?? ""}\n\n` +
     `Do this first:\n` +
-    `1. Log in and CHANGE the password\n` +
-    `2. ${safety}\n` +
-    `3. Keep this login safe — never share it\n\n` +
-    `${mgrRef} will coach you from here 💪`;
+    `1. Log in with the above and CHANGE the password\n` +
+    `2. If it asks for a 2-factor code, just message me "code" and I'll send it 🔐\n` +
+    `3. ${safety}\n\n` +
+    `This account is yours alone — never share the login. ${mgrRef} will coach you 💪`;
   const r = await sendTelegramMessage(app.candidate.telegramChatId, body);
   await prisma.message.create({
     data: {
@@ -644,14 +648,18 @@ export async function deliverAccountLogin(
     : "Mark the account 'sensitive' in settings, then warm it a day or two before hard posting";
   const mgr = asg?.role.manager;
   const mgrRef = mgr ? `${mgr.name}${mgr.telegramHandle ? ` (${mgr.telegramHandle})` : ""}` : "Your manager";
+  // Only the VA-facing fields (username + password). Email/tokens/2FA-secret stay
+  // with the operator for recovery — the VA gets 2FA codes by messaging "code".
+  const [uname, pass] = (account.login ?? "").split(":");
   const body =
     `🔑 Your ${platformLabel} account is ready — log in from your OWN phone/computer:\n\n` +
-    `${account.login}\n\n` +
+    `Username: ${uname}\n` +
+    `Password: ${pass ?? ""}\n\n` +
     `Do this first:\n` +
-    `1. Log in and CHANGE the password\n` +
-    `2. ${safety}\n` +
-    `3. This account is yours alone — keep the login safe, never share it\n\n` +
-    `${mgrRef} will coach you from here 💪`;
+    `1. Log in with the above and CHANGE the password\n` +
+    `2. If it asks for a 2-factor code, just message me "code" and I'll send it 🔐\n` +
+    `3. ${safety}\n\n` +
+    `This account is yours alone — never share the login. ${mgrRef} will coach you 💪`;
   const r = await sendTelegramMessage(candidate.telegramChatId, body);
   await prisma.message.create({
     data: { candidateId: candidate.id, direction: "outbound", channel: "telegram", templateKey: "account_handout", body, status: r.status },
