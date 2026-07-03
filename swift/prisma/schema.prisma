@@ -404,6 +404,7 @@ model Account {
   platform  String // x | instagram | tiktok | reddit | onlyfans | other
   handle    String
   label     String?
+  login     String? // the credential to hand the VA (e.g. "username:password"). Kept in the pool until claimed.
   creatorId String?
   status    String   @default("warming") // warming | active | limited | suspended | banned | retired
   notes     String?

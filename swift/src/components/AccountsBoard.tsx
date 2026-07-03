@@ -96,6 +96,34 @@ function AddAccount({ creators }: { creators: CreatorLite[] }) {
   );
 }
 
+// Reveal/copy the stored login. Hidden by default so shoulder-surfing the
+// dashboard doesn't leak credentials.
+function LoginReveal({ login }: { login: string }) {
+  const [show, setShow] = useState(false);
+  const [copied, setCopied] = useState(false);
+  return (
+    <div className="flex items-center gap-1.5">
+      <code className="rounded bg-panel2 px-1.5 py-0.5 font-mono text-[11px] text-gray-200">
+        {show ? login : "•".repeat(Math.min(12, login.length))}
+      </code>
+      <button className="text-[11px] text-muted hover:text-white" onClick={() => setShow((s) => !s)}>
+        {show ? "hide" : "show"}
+      </button>
+      <button
+        className="text-[11px] text-muted hover:text-white"
+        onClick={() => {
+          navigator.clipboard?.writeText(login).then(() => {
+            setCopied(true);
+            setTimeout(() => setCopied(false), 1200);
+          });
+        }}
+      >
+        {copied ? "✓" : "copy"}
+      </button>
+    </div>
+  );
+}
+
 function AccountCard({ account, users }: { account: AccountView; users: UserLite[] }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
@@ -140,6 +168,21 @@ function AccountCard({ account, users }: { account: AccountView; users: UserLite
           {ACCOUNT_STATUS_META[account.status as keyof typeof ACCOUNT_STATUS_META]?.label ?? account.status}
         </span>
       </div>
+
+      {account.login && (
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <span
+            className={`pill text-[10px] ${
+              account.claimed
+                ? "bg-panel2 text-muted border border-line"
+                : "bg-good/15 text-good border border-good/40"
+            }`}
+          >
+            {account.claimed ? "claimed" : "in pool"}
+          </span>
+          <LoginReveal login={account.login} />
+        </div>
+      )}
 
       <div className="mt-3">
         <label className="label">Status</label>
@@ -281,8 +324,31 @@ export default function AccountsBoard({
     return Array.from(m.values()).sort((a, b) => a.name.localeCompare(b.name));
   }, [accounts]);
 
+  // Free pool = accounts with a login, not yet claimed, still usable.
+  const pool = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const a of accounts) {
+      if (a.login && !a.claimed && (a.status === "warming" || a.status === "active")) {
+        m.set(a.platform, (m.get(a.platform) ?? 0) + 1);
+      }
+    }
+    return Array.from(m.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+  }, [accounts]);
+
   return (
     <div>
+      {pool.length > 0 && (
+        <section className="card mb-6 flex flex-wrap items-center gap-2 p-4">
+          <span className="text-sm font-semibold">Available in pool:</span>
+          {pool.map(([platform, n]) => (
+            <span key={platform} className="pill bg-good/15 text-good border border-good/40">
+              {n} {platform}
+            </span>
+          ))}
+          <span className="text-[11px] text-muted">— each drops out the moment a VA claims it</span>
+        </section>
+      )}
+
       <AddAccount creators={creators} />
 
       {accounts.length === 0 ? (
