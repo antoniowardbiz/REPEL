@@ -590,12 +590,20 @@ function promoSlugify(s: string): string {
  */
 export async function ensurePromoLink(assignmentId: string, firstName: string) {
   const asg = await prisma.assignment.findUnique({ where: { id: assignmentId } });
-  if (!asg || asg.trackSlug) return;
-  const slug = `${promoSlugify(firstName)}${asg.id.slice(-6)}`;
+  if (!asg) return;
+  // Already fully set up — slug AND a real (non-empty) link. Nothing to do.
+  if (asg.trackSlug && asg.promoLink) return;
   const base = (process.env.NEXT_PUBLIC_BASE_URL || "").replace(/\/$/, "");
+  // Without a base URL we can't build a real link — bail rather than storing an
+  // empty one. A later run (once NEXT_PUBLIC_BASE_URL is set) will fill it in.
+  // This is the bug that left VAs stuck on "no link yet": previously we minted a
+  // slug with an empty promoLink and then never revisited it.
+  if (!base) return;
+  // Reuse any existing slug so the link stays stable; only mint one if missing.
+  const slug = asg.trackSlug || `${promoSlugify(firstName)}${asg.id.slice(-6)}`;
   await prisma.assignment.update({
     where: { id: assignmentId },
-    data: { trackSlug: slug, promoLink: base ? `${base}/go/${slug}` : "" },
+    data: { trackSlug: slug, promoLink: `${base}/go/${slug}` },
   });
 }
 
@@ -605,9 +613,13 @@ export async function ensurePromoLink(assignmentId: string, firstName: string) {
  * theirs in one click. Idempotent: VAs who already have a slug are skipped.
  */
 export async function backfillPromoLinks(): Promise<{ generated: number; total: number; trialLinksAssigned: number }> {
-  // 1) Give a /go promo link to anyone missing one.
+  // 1) Give a /go promo link to anyone missing one — including VAs who got a
+  //    slug earlier but an EMPTY promoLink (base URL wasn't set at the time).
   const missingSlug = await prisma.assignment.findMany({
-    where: { status: { in: ["probation", "active"] }, trackSlug: null },
+    where: {
+      status: { in: ["probation", "active"] },
+      OR: [{ trackSlug: null }, { promoLink: null }, { promoLink: "" }],
+    },
     include: { user: true },
   });
   let generated = 0;
@@ -636,10 +648,11 @@ export async function backfillPromoLinks(): Promise<{ generated: number; total: 
  * so everyone has a link + pool trial link, then sends. Skips VAs with no link
  * yet or no bound chat, and reports the counts.
  */
-export async function sendPersonalLinks(): Promise<{
+export async function sendPersonalLinks(opts?: { onlyUnsent?: boolean }): Promise<{
   sent: number;
   noLink: number;
   noChat: number;
+  skipped: number;
   total: number;
 }> {
   await backfillPromoLinks().catch(() => {});
@@ -647,9 +660,21 @@ export async function sendPersonalLinks(): Promise<{
     where: { status: { in: ["probation", "active"] } },
     include: { user: { include: { fromCandidate: true } }, role: true },
   });
+  // When only sending to VAs who've never received their link (the automatic
+  // daily job), look up who already got a personal_link message so we don't
+  // re-spam anyone. The manual "Send links" button omits opts → sends to all.
+  let alreadySent = new Set<string>();
+  if (opts?.onlyUnsent) {
+    const prior = await prisma.message.findMany({
+      where: { templateKey: "personal_link" },
+      select: { candidateId: true },
+    });
+    alreadySent = new Set(prior.map((m) => m.candidateId).filter(Boolean) as string[]);
+  }
   let sent = 0;
   let noLink = 0;
   let noChat = 0;
+  let skipped = 0;
   for (const a of assignments) {
     const cand = a.user?.fromCandidate;
     if (!a.promoLink) {
@@ -658,6 +683,10 @@ export async function sendPersonalLinks(): Promise<{
     }
     if (!cand?.telegramChatId) {
       noChat++;
+      continue;
+    }
+    if (opts?.onlyUnsent && cand.id && alreadySent.has(cand.id)) {
+      skipped++;
       continue;
     }
     const platform = ROLE_PLATFORM[a.role.key];
@@ -676,7 +705,7 @@ export async function sendPersonalLinks(): Promise<{
     });
     sent++;
   }
-  return { sent, noLink, noChat, total: assignments.length };
+  return { sent, noLink, noChat, skipped, total: assignments.length };
 }
 
 /**
