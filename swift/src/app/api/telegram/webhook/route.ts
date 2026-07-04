@@ -300,6 +300,42 @@ export async function POST(req: Request) {
       handled = true;
     }
 
+    // ── "link": a VA asking for their personal promo link again. VAs lose it
+    // constantly, so let them self-serve instead of pinging the operator.
+    if (!handled && text && /^\/?(link|my\s*link)\b/i.test(text.trim())) {
+      const user = await prisma.user.findFirst({ where: { candidateId: candidate.id } });
+      const asg = user
+        ? await prisma.assignment.findFirst({
+            where: { userId: user.id, status: { in: ["probation", "active"] } },
+            orderBy: { createdAt: "desc" },
+            include: { role: true },
+          })
+        : null;
+      if (asg?.promoLink) {
+        const platform = ROLE_PLATFORM[asg.role.key];
+        const placement =
+          platform === "x"
+            ? "Put it in your X bio AND drop it in the comments of EVERY post."
+            : platform === "reddit"
+              ? "Put it in your Reddit bio so it sits on every post."
+              : "Keep it in your bio so fans can always find it.";
+        await replyAndLog(
+          candidate.id,
+          chatId,
+          `🔗 Here's your personal promo link — post THIS to bring subs, it's tracked to you:\n\n${asg.promoLink}\n\n📍 ${placement}`,
+          "link_resend"
+        );
+      } else {
+        await replyAndLog(
+          candidate.id,
+          chatId,
+          `You don't have a promo link set yet — your manager will sort it 🙏`,
+          "link_none"
+        );
+      }
+      handled = true;
+    }
+
     // ── VA trouble signals: content run out / account banned ─────────────────
     // Catch "I'm out of content" or "my account got banned" BEFORE the general
     // AI so it becomes a visible flag on the dashboard + an ops alert, not just
