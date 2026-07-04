@@ -27,7 +27,7 @@ const PLATFORM_LABEL: Record<string, string> = {
 export default async function LinksPage() {
   const weekAgo = new Date(Date.now() - 7 * DAY);
 
-  const [assignments, totalAgg, weekAgg, lastAgg] = await Promise.all([
+  const [assignments, totalAgg, weekAgg, lastAgg, sentAgg] = await Promise.all([
     prisma.assignment.findMany({
       where: { status: { in: ["probation", "active"] } },
       include: { user: true, creator: true, role: true },
@@ -47,54 +47,75 @@ export default async function LinksPage() {
       where: { type: "promo_click", userId: { not: null } },
       _max: { createdAt: true },
     }),
+    // "Link sent" is derived from the personal_link DM we log when a VA is sent
+    // their link — no extra column needed. Latest send per candidate.
+    prisma.message.groupBy({
+      by: ["candidateId"],
+      where: { templateKey: "personal_link" },
+      _max: { createdAt: true },
+    }),
   ]);
 
   const totalBy = new Map(totalAgg.map((c) => [c.userId as string, c._count._all]));
   const weekBy = new Map(weekAgg.map((c) => [c.userId as string, c._count._all]));
   const lastBy = new Map(lastAgg.map((c) => [c.userId as string, c._max.createdAt as Date | null]));
+  const sentBy = new Map(sentAgg.map((m) => [m.candidateId as string, m._max.createdAt as Date | null]));
 
   const rows = assignments
-    .map((a) => ({
-      id: a.id,
-      name: a.user.name,
-      model: a.creator.name,
-      platform: ROLE_PLATFORM[a.role.key] ?? "",
-      link: a.promoLink ?? "",
-      label: a.trialLinkLabel ?? "",
-      total: totalBy.get(a.userId) ?? 0,
-      week: weekBy.get(a.userId) ?? 0,
-      last: lastBy.get(a.userId) ?? null,
-    }))
-    .sort((x, y) => y.total - x.total || y.week - x.week || x.name.localeCompare(y.name));
+    .map((a) => {
+      const platform = ROLE_PLATFORM[a.role.key] ?? "";
+      const platLabel = PLATFORM_LABEL[platform] ?? platform;
+      return {
+        id: a.id,
+        name: a.user.name,
+        model: a.creator.name,
+        platform,
+        platLabel,
+        // Always show a clear slot: the exact Infloww label (e.g. LOLA-X-1) when a
+        // pool link is assigned, else a generic MODEL·PLATFORM so it's never blank.
+        slot: a.trialLinkLabel || `${a.creator.name.toUpperCase()}·${platLabel.toUpperCase()}`,
+        hasInflowwLabel: Boolean(a.trialLinkLabel),
+        link: a.promoLink ?? "",
+        subs: a.subs ?? 0,
+        total: totalBy.get(a.userId) ?? 0,
+        week: weekBy.get(a.userId) ?? 0,
+        last: lastBy.get(a.userId) ?? null,
+        sent: a.user.candidateId ? sentBy.get(a.user.candidateId) ?? null : null,
+      };
+    })
+    .sort((x, y) => y.subs - x.subs || y.total - x.total || x.name.localeCompare(y.name));
 
   const totalClicks = rows.reduce((s, r) => s + r.total, 0);
-  const weekClicks = rows.reduce((s, r) => s + r.week, 0);
+  const totalSubs = rows.reduce((s, r) => s + r.subs, 0);
   const liveLinks = rows.filter((r) => r.link).length;
-  const zeroClicks = rows.filter((r) => r.link && r.total === 0).length;
+  const sentCount = rows.filter((r) => r.sent).length;
   const missingLinks = rows.filter((r) => !r.link).length;
+  const notSent = rows.filter((r) => r.link && !r.sent).length;
 
   const tiles = [
+    { label: "Subs driven (all-time)", value: totalSubs },
     { label: "Clicks (all-time)", value: totalClicks },
-    { label: "Clicks (7 days)", value: weekClicks },
-    { label: "Live links", value: liveLinks },
-    { label: "0 clicks yet", value: zeroClicks, warn: zeroClicks > 0 },
+    { label: "Links sent", value: `${sentCount}/${rows.length}` },
+    { label: "Missing links", value: missingLinks, warn: missingLinks > 0 },
   ];
 
   return (
     <div>
       <h1 className="font-display text-2xl font-bold">Links &amp; Clicks</h1>
       <p className="mb-4 text-sm text-muted">
-        Every VA&rsquo;s personal tracked link and how many times it&rsquo;s been clicked. Top clickers first.
+        Every VA&rsquo;s tracked link, whether it&rsquo;s been sent to them, and what it&rsquo;s driving —
+        subs first, then clicks.
       </p>
 
       {/* How tracking works — the thing that trips everyone up */}
       <div className="mb-5 rounded-lg border border-brand/40 bg-brand/10 p-3 text-sm">
-        <span className="font-semibold text-white">Clicks only count the tracked link.</span>{" "}
+        <span className="font-semibold text-white">Clicks &amp; subs only count the tracked link.</span>{" "}
         <span className="text-muted">
-          A click is logged when someone opens the VA&rsquo;s{" "}
-          <span className="font-mono text-[12px] text-white">/go/&hellip;</span> link. If a VA posts a raw
-          OnlyFans or Infloww link instead, it won&rsquo;t show here. Give each VA the link below (or the bot
-          sends it when they message <span className="font-mono text-[12px] text-white">link</span>).
+          A click logs when someone opens the VA&rsquo;s{" "}
+          <span className="font-mono text-[12px] text-white">/go/&hellip;</span> link; subs fill in when you
+          import Infloww earnings (matched by the slot label, e.g.{" "}
+          <span className="font-mono text-[12px] text-white">LOLA-X-1</span>). If a VA posts a raw OnlyFans
+          link instead, nothing shows here.
         </span>
       </div>
 
@@ -110,9 +131,17 @@ export default async function LinksPage() {
 
       {missingLinks > 0 && (
         <div className="mb-4 rounded-lg border border-warn/40 bg-warn/10 p-3 text-sm text-warn">
-          {missingLinks} active VA{missingLinks === 1 ? " has" : "s have"} no tracked link yet. Open{" "}
-          <span className="font-semibold">VAs &amp; Models</span> and hit{" "}
-          <span className="font-semibold">Backfill promo links</span> to generate them.
+          {missingLinks} active VA{missingLinks === 1 ? " has" : "s have"} no tracked link yet. These now
+          generate automatically on deploy and daily — or hit{" "}
+          <span className="font-semibold">Backfill promo links</span> on{" "}
+          <span className="font-semibold">VAs &amp; Models</span> to do it right now.
+        </div>
+      )}
+      {missingLinks === 0 && notSent > 0 && (
+        <div className="mb-4 rounded-lg border border-line bg-panel2 p-3 text-sm text-muted">
+          {notSent} VA{notSent === 1 ? "" : "s"} ha{notSent === 1 ? "s" : "ve"} a link but ha{notSent === 1 ? "sn" : "ven"}&rsquo;t
+          been sent it. They&rsquo;re DM&rsquo;d automatically each day, or hit{" "}
+          <span className="font-semibold">Send links</span> on VAs &amp; Models to send now.
         </div>
       )}
 
@@ -126,12 +155,11 @@ export default async function LinksPage() {
               <tr>
                 <th className="px-3 py-2 text-left font-medium">#</th>
                 <th className="px-3 py-2 text-left font-medium">VA</th>
-                <th className="px-3 py-2 text-left font-medium">Platform</th>
-                <th className="px-3 py-2 text-left font-medium">Model</th>
+                <th className="px-3 py-2 text-left font-medium">Slot</th>
+                <th className="px-3 py-2 text-right font-medium">Subs</th>
                 <th className="px-3 py-2 text-right font-medium">Clicks</th>
-                <th className="px-3 py-2 text-right font-medium">7&nbsp;days</th>
                 <th className="px-3 py-2 text-left font-medium">Last click</th>
-                <th className="px-3 py-2 text-left font-medium">Infloww</th>
+                <th className="px-3 py-2 text-left font-medium">Sent</th>
                 <th className="px-3 py-2 text-left font-medium">Tracked link</th>
               </tr>
             </thead>
@@ -139,25 +167,36 @@ export default async function LinksPage() {
               {rows.map((r, i) => (
                 <tr key={r.id} className="border-t border-line">
                   <td className="px-3 py-2 font-mono text-[11px] text-faint">{i + 1}</td>
-                  <td className="px-3 py-2 font-medium">{r.name}</td>
                   <td className="px-3 py-2">
-                    {r.platform ? (
-                      <span className="pill bg-panel2 text-muted">{PLATFORM_LABEL[r.platform] ?? r.platform}</span>
-                    ) : (
-                      <span className="text-faint">—</span>
-                    )}
+                    <div className="font-medium">{r.name}</div>
+                    <div className="text-[11px] text-faint">
+                      {r.model} · {r.platLabel}
+                    </div>
                   </td>
-                  <td className="px-3 py-2">{r.model}</td>
+                  <td className="px-3 py-2">
+                    <span
+                      className={`pill font-mono text-[11px] ${
+                        r.hasInflowwLabel ? "bg-panel2 text-good" : "bg-panel2 text-muted"
+                      }`}
+                    >
+                      {r.slot}
+                    </span>
+                  </td>
+                  <td className="px-3 py-2 text-right font-mono tabular-nums">
+                    {r.subs > 0 ? <span className="text-good">{r.subs}</span> : <span className="text-faint">0</span>}
+                  </td>
                   <td className="px-3 py-2 text-right font-mono tabular-nums">
                     {r.total > 0 ? <span className="text-white">{r.total}</span> : <span className="text-faint">0</span>}
+                    {r.week > 0 && <span className="ml-1 text-[10px] text-faint">+{r.week}/7d</span>}
                   </td>
-                  <td className="px-3 py-2 text-right font-mono tabular-nums text-muted">{r.week || ""}</td>
                   <td className="px-3 py-2 text-[12px] text-muted">{ago(r.last)}</td>
-                  <td className="px-3 py-2">
-                    {r.label ? (
-                      <span className="pill bg-panel2 font-mono text-[11px] text-good">{r.label}</span>
+                  <td className="px-3 py-2 text-[12px]">
+                    {r.sent ? (
+                      <span className="text-good">✓ {ago(r.sent)}</span>
+                    ) : r.link ? (
+                      <span className="text-warn">not sent</span>
                     ) : (
-                      <span className="text-[11px] text-faint">—</span>
+                      <span className="text-faint">—</span>
                     )}
                   </td>
                   <td className="px-3 py-2">
@@ -167,7 +206,7 @@ export default async function LinksPage() {
               ))}
               {rows.length === 0 && (
                 <tr>
-                  <td colSpan={9} className="px-3 py-4 text-center text-muted">
+                  <td colSpan={8} className="px-3 py-4 text-center text-muted">
                     No active VAs yet.
                   </td>
                 </tr>
