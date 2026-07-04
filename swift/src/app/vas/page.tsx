@@ -8,6 +8,7 @@ import RolePayEditor from "@/components/RolePayEditor";
 import AssignmentPromoLink from "@/components/AssignmentPromoLink";
 import ModelLinksEditor from "@/components/ModelLinksEditor";
 import PromoBackfillButton from "@/components/PromoBackfillButton";
+import SendLinksButton from "@/components/SendLinksButton";
 import TrialLinkPool from "@/components/TrialLinkPool";
 import { trialLinkPoolStats } from "@/lib/trial-links";
 
@@ -214,9 +215,12 @@ export default async function VasPage() {
 
       {/* Assignments */}
       <section className="card p-4">
-        <div className="mb-3 flex items-center justify-between">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <h2 className="font-display text-base font-semibold">Active assignments ({assignments.length})</h2>
-          <PromoBackfillButton />
+          <div className="flex items-center gap-3">
+            <SendLinksButton />
+            <PromoBackfillButton />
+          </div>
         </div>
         <div className="overflow-hidden rounded-lg border border-line">
           <table className="w-full text-sm">

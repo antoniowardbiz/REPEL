@@ -630,6 +630,56 @@ export async function backfillPromoLinks(): Promise<{ generated: number; total: 
 }
 
 /**
+ * DM every active VA their personal promo link with placement instructions —
+ * so VAs hired before the link system existed (or whose link was blank) actually
+ * RECEIVE it, not just have it sitting on the dashboard. Runs the backfill first
+ * so everyone has a link + pool trial link, then sends. Skips VAs with no link
+ * yet or no bound chat, and reports the counts.
+ */
+export async function sendPersonalLinks(): Promise<{
+  sent: number;
+  noLink: number;
+  noChat: number;
+  total: number;
+}> {
+  await backfillPromoLinks().catch(() => {});
+  const assignments = await prisma.assignment.findMany({
+    where: { status: { in: ["probation", "active"] } },
+    include: { user: { include: { fromCandidate: true } }, role: true },
+  });
+  let sent = 0;
+  let noLink = 0;
+  let noChat = 0;
+  for (const a of assignments) {
+    const cand = a.user?.fromCandidate;
+    if (!a.promoLink) {
+      noLink++;
+      continue;
+    }
+    if (!cand?.telegramChatId) {
+      noChat++;
+      continue;
+    }
+    const platform = ROLE_PLATFORM[a.role.key];
+    const placement =
+      platform === "x"
+        ? "Put it in your X bio AND drop it in the comments of EVERY post — that's how fans find it."
+        : platform === "reddit"
+          ? "Put it in your Reddit bio so it sits on every post you make."
+          : "Keep it in your bio so fans can always find it.";
+    const body =
+      `🔗 ${firstNameOf(cand.fullName)}, here's your personal promo link — post THIS to bring subs, ` +
+      `it's tracked to you:\n\n${a.promoLink}\n\n📍 ${placement}`;
+    const r = await sendTelegramMessage(cand.telegramChatId, body);
+    await prisma.message.create({
+      data: { candidateId: cand.id, direction: "outbound", channel: "telegram", templateKey: "personal_link", body, status: r.status },
+    });
+    sent++;
+  }
+  return { sent, noLink, noChat, total: assignments.length };
+}
+
+/**
  * Onboard a candidate all the way to ACTIVE and auto-hand them a pool account —
  * fully hands-off so VAs get started without the operator present. Shared by the
  * X path (after they SUBMIT their trial) and the Reddit path (straight after the
