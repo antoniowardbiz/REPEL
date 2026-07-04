@@ -12,22 +12,27 @@ import { runDeadlineChecks } from "./deadlines";
 import { runStaleSweep } from "./stale";
 import { sendDailyDigest, sendMorningMessages } from "./daily";
 import { runDailyCoaching } from "./coaching";
+import { runSelfImprovement } from "./self-improve";
 
 const g = globalThis as unknown as { __swiftSchedulerStarted?: boolean };
 
 const MORNING_HOUR = Number(process.env.MORNING_HOUR ?? 8);
 const DIGEST_HOUR = Number(process.env.DIGEST_HOUR ?? 21);
 const COACH_HOUR = Number(process.env.COACH_HOUR ?? 20); // proactive VA coaching, once/day
+const IMPROVE_DAY = Number(process.env.IMPROVE_DAY ?? 1); // weekly self-improvement (0=Sun … 6=Sat, Mon default)
+const IMPROVE_HOUR = Number(process.env.IMPROVE_HOUR ?? 9);
 const TZ_OFFSET = Number(process.env.TZ_OFFSET ?? 0);
 
 let lastMorningDay = "";
 let lastDigestDay = "";
 let lastCoachDay = "";
+let lastImproveDay = "";
 
 function local() {
   return new Date(Date.now() + TZ_OFFSET * 3600_000);
 }
 const localHour = () => local().getUTCHours();
+const localDow = () => local().getUTCDay();
 const todayKey = () => local().toISOString().slice(0, 10);
 
 async function safe(label: string, fn: () => Promise<unknown>) {
@@ -64,6 +69,11 @@ export function startScheduler() {
         if (h === COACH_HOUR && lastCoachDay !== day) {
           lastCoachDay = day;
           await runDailyCoaching();
+        }
+        // Weekly self-improvement pass (fires once, on IMPROVE_DAY at IMPROVE_HOUR).
+        if (localDow() === IMPROVE_DAY && h === IMPROVE_HOUR && lastImproveDay !== day) {
+          lastImproveDay = day;
+          await runSelfImprovement();
         }
       }),
     15 * 60_000
