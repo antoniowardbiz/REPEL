@@ -39,10 +39,10 @@ export type ManagerSeed = {
 };
 
 export const MANAGERS: ManagerSeed[] = [
+  // Only real managers here. Haria runs the Reddit VAs (@swiftreddit); X VAs
+  // report to @swiftxvas (set on the x_va role). Hera, Zaidee and Tina are
+  // Reddit VAs, NOT managers — they must never be seeded into this list.
   { name: "Haria", telegramHandle: "@swiftreddit", redditManager: true, models: ["Lola", "Lae"] },
-  { name: "Hera", models: ["Lola", "Lae"] },
-  { name: "Zaidee", models: ["Lola"] },
-  { name: "Tina", models: ["Lae"] },
 ];
 
 export type RoleSeed = {
