@@ -828,6 +828,41 @@ export async function deliverAccountLogin(
   return { sent: true };
 }
 
+/**
+ * A VA's account is down (banned/shadowbanned). Auto-recover from the pool: hand
+ * them a fresh account and DM the login right away so they're never left idle on
+ * a manual swap. Deliberately ADDITIVE — we never auto-revoke or mark the old
+ * account banned, because the trigger (VA saying "locked out"/"banned") can be a
+ * transient lockout, and destroying a good account is worse than the idle it
+ * fixes. The human retires the genuinely-dead account from /accounts. Returns
+ * whether a fresh account was handed, its handle, whether they already held one,
+ * and whether the pool was empty.
+ */
+export async function autoReplaceAccount(
+  candidateId: string
+): Promise<{ replaced: boolean; handle?: string; hadOne?: boolean; poolEmpty?: boolean }> {
+  const user = await prisma.user.findFirst({ where: { candidateId } });
+  if (!user) return { replaced: false };
+  const asg = await prisma.assignment.findFirst({
+    where: { userId: user.id, status: { in: ["probation", "active"] } },
+    orderBy: { createdAt: "desc" },
+    include: { role: true },
+  });
+  const platform = asg ? ROLE_PLATFORM[asg.role.key] : undefined;
+  if (!platform) return { replaced: false };
+
+  const hadOne =
+    (await prisma.accessGrant.count({
+      where: { userId: user.id, status: "active", account: { platform } },
+    })) > 0;
+
+  const fresh = await claimNextAccount({ platform, creatorId: asg?.creatorId ?? null, userId: user.id });
+  if (!fresh) return { replaced: false, hadOne, poolEmpty: true };
+
+  await deliverAccountLogin(fresh.id, user.id).catch(() => {});
+  return { replaced: true, handle: fresh.handle, hadOne };
+}
+
 export async function submitTrial(
   applicationId: string,
   submissionUrls: string[],

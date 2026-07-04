@@ -9,6 +9,7 @@ import { prisma } from "./db";
 import { sendOpsAlert } from "./telegram";
 import { firstNameOf } from "./templates";
 import { ROLE_PLATFORM } from "./roles-config";
+import { autoReplaceAccount } from "./services";
 
 export type VaSignal = "content_low" | "account_issue";
 
@@ -54,8 +55,9 @@ export async function raiseVaFlag(
   const mgrRef = mgr ? `${mgr.name}${mgr.telegramHandle ? ` (${mgr.telegramHandle})` : ""}` : "your manager";
 
   // Dedupe: if there's already an open flag of this kind for this VA, don't spam
-  // a second alert — just reassure again.
+  // a second alert or hand a SECOND replacement — just reassure again.
   const existing = await prisma.opsFlag.findFirst({ where: { candidateId, kind, status: "open" } });
+  let autoReplaced = false;
   if (!existing) {
     await prisma.opsFlag.create({
       data: {
@@ -73,16 +75,38 @@ export async function raiseVaFlag(
         `📉 CONTENT LOW: ${candidate?.fullName ?? candidateId} (${model}${platformLabel ? `/${platformLabel}` : ""}) is out of content — reload the ${model} ${platformLabel} drive. ("${text.slice(0, 120)}")`
       );
     } else {
-      await sendOpsAlert(
-        `🚫 ACCOUNT ISSUE: ${candidate?.fullName ?? candidateId}'s ${platformLabel || ""} account may be down (banned/suspended?) — check it and hand a replacement from the pool. ("${text.slice(0, 120)}")`
-      );
+      // Account down → try to self-heal from the pool right now instead of
+      // leaving the VA idle on a manual swap. (The open flag stays until you
+      // clear it, so a repeat "still banned" is deduped — no second account.)
+      const rep = await autoReplaceAccount(candidateId).catch(() => ({ replaced: false }) as Awaited<ReturnType<typeof autoReplaceAccount>>);
+      if (rep.replaced) {
+        autoReplaced = true;
+        await sendOpsAlert(
+          `✅ AUTO-RECOVERED: handed ${candidate?.fullName ?? candidateId} a fresh ${platformLabel || ""} account (${rep.handle}) from the pool so they're back up now.` +
+            (rep.hadOne
+              ? ` Retire their old ${platformLabel || ""} account on /accounts if it's genuinely dead. ("${text.slice(0, 100)}")`
+              : "")
+        );
+      } else if (rep.poolEmpty) {
+        await sendOpsAlert(
+          `🚫 ACCOUNT ISSUE + POOL EMPTY: ${candidate?.fullName ?? candidateId}'s ${platformLabel || ""} account is down and there's NO replacement in the pool — add one on /accounts and hand it over. ("${text.slice(0, 120)}")`
+        );
+      } else {
+        await sendOpsAlert(
+          `🚫 ACCOUNT ISSUE: ${candidate?.fullName ?? candidateId}'s ${platformLabel || ""} account may be down (banned/suspended?) — check it and hand a replacement from the pool. ("${text.slice(0, 120)}")`
+        );
+      }
     }
   }
 
   const reply =
     kind === "content_low"
       ? `Good shout ${first} — I've flagged it so fresh ${model} content gets loaded 👍 Post your strongest bits that are left today, and I'll let you know when the drive's topped up.`
-      : `Thanks for flagging that ${first} 🙏 I've alerted ${mgrRef} to check the account and sort you a fresh one — sit tight, we'll get you back up fast. Don't keep trying to force the old login in the meantime.`;
+      : autoReplaced
+        ? `Sorted ${first} 🔑 I've swapped you to a fresh account — the new login is in the message just above. Log in, change the password, and message "code" if it asks for a 2-factor code. Back up and running 💪`
+        : existing
+          ? `Already on it ${first} 🙏 I've flagged this and someone's sorting you a fresh account — check any new login I've sent, and give ${mgrRef} a shout if you're still stuck.`
+          : `Thanks for flagging that ${first} 🙏 I've alerted ${mgrRef} to check the account and sort you a fresh one — sit tight, we'll get you back up fast. Don't keep trying to force the old login in the meantime.`;
   return { reply };
 }
 

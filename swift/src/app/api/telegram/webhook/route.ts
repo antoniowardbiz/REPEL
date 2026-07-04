@@ -22,6 +22,11 @@ import { classifyVaSignal, raiseVaFlag } from "@/lib/signals";
 
 const URL_RE = /\bhttps?:\/\/[^\s]+/gi;
 const SUBMIT_RE = /\b(submit|submitted|done|finished|complete[d]?)\b/i;
+// 2FA request — matches natural phrasing ("what's my login code"), not only
+// messages that START with the word. Gated on a short message so a long AI
+// question that happens to mention "code" doesn't trip it.
+const CODE_RE = /\b(2fa|otp|passcode|(?:login|verification|auth|2\s*factor)\s*code|code)\b/i;
+const CODE_STRIP_RE = /\/?(2fa|otp|passcode|(?:login|verification|auth|2\s*factor)\s*code|code)\b[:,\s]*/i;
 // Account-check answers (has an account to use, or needs one set up).
 const YES_RE = /\b(yes|yep|yeah|yup|ya|i do|i have|have one|got one|got it|ready|affirmative|sure)\b/i;
 const NO_RE = /\b(no|nope|nah|don'?t|do not|haven'?t|need (?:one|an account|setup|set up)|not yet|new account)\b/i;
@@ -270,31 +275,50 @@ export async function POST(req: Request) {
     // They message "code" / "2fa" / "otp" and the bot generates the current TOTP
     // for the account they hold and replies with it — no authenticator app on
     // their end. (Same automation as the outreach side of the business.)
-    if (!handled && text && /^\/?(code|2fa|otp|login\s*code)\b/i.test(text.trim())) {
+    if (!handled && text && text.trim().length <= 64 && CODE_RE.test(text)) {
       const user = await prisma.user.findFirst({ where: { candidateId: candidate.id } });
-      const grant = user
-        ? await prisma.accessGrant.findFirst({
+      // ALL accounts they hold (Reddit VAs run several) — not just the newest.
+      const grants = user
+        ? await prisma.accessGrant.findMany({
             where: { userId: user.id, status: "active", account: { login: { not: null } } },
             orderBy: { grantedAt: "desc" },
             include: { account: true },
           })
-        : null;
-      const secret = parse2FASecret(grant?.account.login);
-      if (secret) {
-        const code = totp(secret);
-        const left = totpSecondsRemaining();
-        await replyAndLog(
-          candidate.id,
-          chatId,
-          `🔐 Your login code: ${code}\n(good for ~${left}s — if it expires just message "code" again)`,
-          "twofa_code"
-        );
-      } else {
+        : [];
+      const withSecret = grants
+        .map((g) => ({ handle: g.account.handle, secret: parse2FASecret(g.account.login) }))
+        .filter((x): x is { handle: string; secret: string } => Boolean(x.secret));
+
+      if (withSecret.length === 0) {
         await replyAndLog(
           candidate.id,
           chatId,
           `I don't have a login code on file for your account yet — your manager will sort it 🙏`,
           "twofa_none"
+        );
+      } else {
+        // Did they name an account ("code laesmith")? Match the leftover against
+        // the handles they hold; otherwise default to the most recent.
+        const rest = text.trim().replace(CODE_STRIP_RE, "").trim().toLowerCase();
+        let pick = withSecret[0];
+        if (rest) {
+          const named = withSecret.find(
+            (x) => x.handle.toLowerCase().includes(rest) || rest.includes(x.handle.toLowerCase())
+          );
+          if (named) pick = named;
+        }
+        const code = totp(pick.secret);
+        const left = totpSecondsRemaining();
+        const others = withSecret.filter((x) => x.handle !== pick.handle).map((x) => x.handle);
+        const label = withSecret.length > 1 ? ` for ${pick.handle}` : "";
+        const extra = others.length
+          ? `\n\nYou also hold: ${others.join(", ")} — reply e.g. "code ${others[0]}" for those.`
+          : "";
+        await replyAndLog(
+          candidate.id,
+          chatId,
+          `🔐 Your login code${label}: ${code}\n(good for ~${left}s — message "code" again if it expires)${extra}`,
+          "twofa_code"
         );
       }
       handled = true;

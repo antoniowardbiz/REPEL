@@ -166,6 +166,51 @@ export type AccountView = {
   grants: { id: string; userId: string; userName: string; grantedAt: string }[];
 };
 
+export type VaAccounts = {
+  userId: string;
+  vaName: string;
+  accounts: {
+    id: string;
+    platform: string;
+    handle: string;
+    status: string;
+    creatorName: string | null;
+    grantedAt: string;
+  }[];
+};
+
+/**
+ * Accounts grouped by the VA who holds them (active grants only) — oversight of
+ * who has which accounts and their health. Reddit VAs run a stable of accounts;
+ * this is where you see it at a glance. Busiest VAs first.
+ */
+export async function accountsByVa(): Promise<VaAccounts[]> {
+  const grants = await prisma.accessGrant.findMany({
+    where: { status: "active" },
+    include: { user: true, account: { include: { creator: true } } },
+    orderBy: { grantedAt: "desc" },
+  });
+  const byUser = new Map<string, VaAccounts>();
+  for (const g of grants) {
+    let row = byUser.get(g.userId);
+    if (!row) {
+      row = { userId: g.userId, vaName: g.user.name, accounts: [] };
+      byUser.set(g.userId, row);
+    }
+    row.accounts.push({
+      id: g.account.id,
+      platform: g.account.platform,
+      handle: g.account.handle,
+      status: g.account.status,
+      creatorName: g.account.creator?.name ?? null,
+      grantedAt: g.grantedAt.toISOString(),
+    });
+  }
+  return [...byUser.values()].sort(
+    (a, b) => b.accounts.length - a.accounts.length || a.vaName.localeCompare(b.vaName)
+  );
+}
+
 /** All accounts with their model and current (active) grants, for the page. */
 export async function accountsOverview(): Promise<AccountView[]> {
   const accounts = await prisma.account.findMany({
