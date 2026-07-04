@@ -325,6 +325,9 @@ model Assignment {
   activeStreak   Int      @default(0) // consecutive active days right now
   bestStreak     Int      @default(0) // their personal-best streak (for comeback framing — never shamed to 0)
   lastCoachedDay DateTime? // last day the coach messaged them, so we never double-nudge in a day
+  subs           Int      @default(0) // paid subs this VA's Infloww link has driven (imported from Infloww)
+  earningsCents  Int      @default(0) // earnings this VA has driven, in cents (imported from Infloww; integer to avoid float drift)
+  earningsSyncedAt DateTime? // when subs/earnings were last imported
   startDate     DateTime @default(now())
   status        String   @default("probation") // probation | active | ended
   createdAt     DateTime @default(now())

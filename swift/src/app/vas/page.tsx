@@ -10,7 +10,9 @@ import ModelLinksEditor from "@/components/ModelLinksEditor";
 import PromoBackfillButton from "@/components/PromoBackfillButton";
 import SendLinksButton from "@/components/SendLinksButton";
 import TrialLinkPool from "@/components/TrialLinkPool";
+import EarningsPanel from "@/components/EarningsPanel";
 import { trialLinkPoolStats } from "@/lib/trial-links";
+import { earningsLeaderboard } from "@/lib/earnings";
 
 export const dynamic = "force-dynamic";
 
@@ -32,6 +34,7 @@ export default async function VasPage() {
     prisma.role.findMany({ where: { active: true }, orderBy: { displayName: "asc" } }),
     trialLinkPoolStats(),
   ]);
+  const earnings = await earningsLeaderboard();
 
   const managerRows = managers.map((u) => ({
     name: u.name,
@@ -212,6 +215,9 @@ export default async function VasPage() {
 
       {/* Trial-link pool */}
       <TrialLinkPool buckets={poolBuckets} />
+
+      {/* Earnings & commission */}
+      <EarningsPanel rows={earnings.rows} totals={earnings.totals} pct={earnings.pct} />
 
       {/* Assignments */}
       <section className="card p-4">
