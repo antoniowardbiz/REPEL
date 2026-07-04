@@ -8,6 +8,7 @@ const links = [
   { href: "/conversations", label: "Conversations" },
   { href: "/scoring", label: "Scorer Queue" },
   { href: "/vas", label: "VAs & Models" },
+  { href: "/links", label: "Links & Clicks" },
   { href: "/folders", label: "Folders" },
   { href: "/accounts", label: "Accounts" },
   { href: "/reports", label: "Reports" },
