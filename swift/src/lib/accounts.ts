@@ -93,16 +93,26 @@ export async function claimNextAccount(input: {
   creatorId?: string | null;
   userId: string;
 }) {
-  const account = await prisma.account.findFirst({
-    where: {
-      platform: input.platform,
-      login: { not: null },
-      status: { in: ["warming", "active"] },
-      grants: { none: { status: "active" } },
-      ...(input.creatorId ? { creatorId: input.creatorId } : {}),
-    },
-    orderBy: { createdAt: "asc" }, // oldest first (FIFO through the batch)
-  });
+  const base = {
+    platform: input.platform,
+    login: { not: null },
+    status: { in: ["warming", "active"] },
+    grants: { none: { status: "active" } },
+  };
+  // Prefer an account tagged to this VA's model, but FALL BACK to any free
+  // account on the platform. A pool X account posts fine whatever model's
+  // content the VA runs, so requiring a per-model match was a dead-end: a VA
+  // could get "no account" while free (untagged / other-model) accounts sat
+  // unused in the pool — exactly why hires ended up account-less.
+  let account = input.creatorId
+    ? await prisma.account.findFirst({
+        where: { ...base, creatorId: input.creatorId },
+        orderBy: { createdAt: "asc" },
+      })
+    : null;
+  if (!account) {
+    account = await prisma.account.findFirst({ where: base, orderBy: { createdAt: "asc" } });
+  }
   if (!account) return null;
   await grantAccess(account.id, input.userId, "auto-handout");
   await audit("account_claimed", "Account", account.id, { userId: input.userId });
