@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { submitTrial, deliverStageMessage, routeToManagerForAccount, selectRole, renamePromoLink } from "@/lib/services";
+import { submitTrial, deliverStageMessage, routeToManagerForAccount, selectRole, renamePromoLink, deliverAccountLogin } from "@/lib/services";
+import { claimNextAccount } from "@/lib/accounts";
 import { sendOpsAlert, sendTelegramMessage } from "@/lib/telegram";
 import { ROLE_PLATFORM } from "@/lib/roles-config";
 import { handleCandidateMessage } from "@/lib/ai-support";
@@ -30,6 +31,10 @@ const CODE_STRIP_RE = /\/?(2fa|otp|passcode|(?:login|verification|auth|2\s*facto
 // Account-check answers (has an account to use, or needs one set up).
 const YES_RE = /\b(yes|yep|yeah|yup|ya|i do|i have|have one|got one|got it|ready|affirmative|sure)\b/i;
 const NO_RE = /\b(no|nope|nah|don'?t|do not|haven'?t|need (?:one|an account|setup|set up)|not yet|new account)\b/i;
+// A VA asking for their ACCOUNT login/details (username + password). Distinct
+// from the "account banned" trouble signal — that's handled separately.
+const LOGIN_RE =
+  /\b(account\s*(?:details|login|access|info|credentials)|login\s*(?:details|info)|my\s*login|my\s*account\s*details|send\s*(?:me\s*)?(?:my\s*)?account)\b/i;
 // A VA asking to change the NAME shown in their tracked promo link (e.g. a
 // persona name). This is a request the bot used to escalate to a human.
 const LINK_RENAME_RE =
@@ -380,6 +385,53 @@ export async function POST(req: Request) {
           `You don't have a promo link set yet — your manager will sort it 🙏`,
           "link_none"
         );
+      }
+      handled = true;
+    }
+
+    // ── "account" / "my login": a VA asking for their account details. Re-send
+    // the login they hold (or claim one from the pool). Guarded so "my account
+    // is banned" still routes to the trouble-signal handler below, not here.
+    if (!handled && text && LOGIN_RE.test(text) && classifyVaSignal(text) !== "account_issue") {
+      const user = await prisma.user.findFirst({ where: { candidateId: candidate.id } });
+      const asg = user
+        ? await prisma.assignment.findFirst({
+            where: { userId: user.id, status: { in: ["probation", "active"] } },
+            orderBy: { createdAt: "desc" },
+            include: { role: true },
+          })
+        : null;
+      if (!user || !asg) {
+        await replyAndLog(
+          candidate.id,
+          chatId,
+          `You're not set up with a model yet — your manager will sort your account shortly 🙏`,
+          "account_none"
+        );
+      } else {
+        const grant = await prisma.accessGrant.findFirst({
+          where: { userId: user.id, status: "active", account: { login: { not: null } } },
+          orderBy: { grantedAt: "desc" },
+        });
+        let accountId = grant?.accountId ?? null;
+        if (!accountId) {
+          const platform = ROLE_PLATFORM[asg.role.key];
+          if (platform) {
+            const acct = await claimNextAccount({ platform, creatorId: asg.creatorId, userId: user.id }).catch(() => null);
+            accountId = acct?.id ?? null;
+          }
+        }
+        if (accountId) {
+          // deliverAccountLogin DMs the username + password itself.
+          await deliverAccountLogin(accountId, user.id);
+        } else {
+          await replyAndLog(
+            candidate.id,
+            chatId,
+            `Your account's being set up — hang tight, it'll come through shortly 🙏 Once you're logged in, message "code" if it asks for a 2-factor code.`,
+            "account_pending"
+          );
+        }
       }
       handled = true;
     }

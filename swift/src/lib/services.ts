@@ -268,7 +268,59 @@ export async function deliverStageMessage(candidateId: string) {
     if (gate?.status === "with_manager") return { skipped: true as const };
     return sendTemplatedMessage(app.id, "brief");
   }
+  // Already hired (ONBOARDING/ACTIVE) — this is the case that used to send
+  // NOTHING: a VA activated before they'd messaged the bot had their account +
+  // link DM'd into a null chat (lost), and then this returned skipped when they
+  // finally bound. Re-deliver the full setup so binding = getting everything.
+  if (isHiredStage(stage)) {
+    await resendActivation(candidateId).catch(() => {});
+    return { skipped: false as const };
+  }
   return { skipped: true as const };
+}
+
+/**
+ * Re-deliver a hired VA's full activation — the onboarding message (model, pay,
+ * content folder, their tracked link + placement) AND their account login. Fires
+ * when an already-ACTIVE VA binds to the bot, and is reusable anywhere a VA needs
+ * their setup re-sent. Claims a pool account if they somehow hold none. Every
+ * send is guarded so one failure never blocks the rest.
+ */
+export async function resendActivation(candidateId: string): Promise<{ sent: boolean }> {
+  const app = await prisma.application.findFirst({
+    where: { candidateId, stage: { in: [...HIRED_STAGES] } },
+    orderBy: { stageChangedAt: "desc" },
+  });
+  if (!app) return { sent: false };
+  const candidate = await prisma.candidate.findUnique({ where: { id: candidateId } });
+  const user = await prisma.user.findFirst({ where: { candidateId } });
+  const asg = user
+    ? await prisma.assignment.findFirst({
+        where: { userId: user.id, status: { in: ["probation", "active"] } },
+        orderBy: { createdAt: "desc" },
+        include: { role: true },
+      })
+    : null;
+  // Ensure their link exists, then send the onboarding message (which carries it).
+  if (asg) await ensurePromoLink(asg.id, firstNameOf(candidate?.fullName || "VA")).catch(() => {});
+  await sendTemplatedMessage(app.id, "onboarding").catch(() => {});
+  // Send their account login — reuse the one they hold, else claim from the pool.
+  if (user && asg) {
+    const grant = await prisma.accessGrant.findFirst({
+      where: { userId: user.id, status: "active", account: { login: { not: null } } },
+      orderBy: { grantedAt: "desc" },
+    });
+    if (grant) {
+      await deliverAccountLogin(grant.accountId, user.id).catch(() => {});
+    } else {
+      const platform = ROLE_PLATFORM[asg.role.key];
+      if (platform) {
+        const acct = await claimNextAccount({ platform, creatorId: asg.creatorId, userId: user.id }).catch(() => null);
+        if (acct) await deliverAccountLogin(acct.id, user.id).catch(() => {});
+      }
+    }
+  }
+  return { sent: true };
 }
 
 // ── Stage transitions + automations ──────────────────────────────────────────
