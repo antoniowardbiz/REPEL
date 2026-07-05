@@ -18,6 +18,9 @@ async function findOrCreateCreator(c: (typeof CREATORS)[number]) {
         igHandle: c.igHandle,
         tiktokHandle: c.tiktokHandle,
         contentDriveUrl: c.contentDriveUrl,
+        // Repair the OF free-trial link from config when provided — this overwrites
+        // a value mistakenly set to the paid profile. Empty config = leave as-is.
+        ...(c.ofTrialUrl ? { ofTrialUrl: c.ofTrialUrl } : {}),
       },
     });
   }
@@ -29,6 +32,7 @@ async function findOrCreateCreator(c: (typeof CREATORS)[number]) {
       igHandle: c.igHandle,
       tiktokHandle: c.tiktokHandle,
       contentDriveUrl: c.contentDriveUrl,
+      ...(c.ofTrialUrl ? { ofTrialUrl: c.ofTrialUrl } : {}),
     },
   });
 }

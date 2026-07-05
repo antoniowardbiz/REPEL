@@ -24,19 +24,28 @@ export async function GET(_req: Request, { params }: { params: { slug: string } 
       .catch(() => {});
   }
 
-  // Prefer this VA's OWN Infloww trial link (per-VA sub attribution). Fall back
-  // to the model's shared OF trial link, then their main page.
+  // Resolve the destination, best → safest:
+  //   1. the VA's OWN pool trial link (per-VA sub attribution) — a real /trial/ link.
+  //   2. the model's shared OF free-trial link, but ONLY if it actually IS a trial
+  //      link. That field has been mis-set to the bare PAID profile before; guarding
+  //      on /trial/ means a mis-set value can never dump subs on the paid page again.
+  //   3. the model's main page as a last resort.
+  const isTrialLink = (u?: string | null) => !!u && /\/(action\/)?trial\//i.test(u);
+  const ofTrial = assignment?.creator?.ofTrialUrl ?? null;
   const dest =
-    assignment?.trialLinkUrl || assignment?.creator?.ofTrialUrl || assignment?.creator?.xMainUrl || null;
+    assignment?.trialLinkUrl ||
+    (isTrialLink(ofTrial) ? ofTrial : null) ||
+    assignment?.creator?.xMainUrl ||
+    null;
   if (!dest) {
     // No destination set for this model yet — send them to OF rather than erroring.
     return NextResponse.redirect("https://onlyfans.com", 302);
   }
-  try {
-    const url = new URL(dest);
-    if (!url.searchParams.has("c")) url.searchParams.set("c", params.slug); // carry the tag downstream
-    return NextResponse.redirect(url.toString(), 302);
-  } catch {
-    return NextResponse.redirect(dest, 302);
-  }
+  // Redirect to the destination EXACTLY as stored — a byte-for-byte passthrough,
+  // no query params bolted on. Attribution is already logged server-side above
+  // (per-slug), so we don't need to carry a tag downstream. Critically, appending
+  // ?c=… to an OnlyFans /trial/<code> link can bump the visitor off the free-trial
+  // route and onto the paid profile page — the exact leak we're closing. A VA's
+  // /go link must land on the same free-trial page as the raw link they'd share.
+  return NextResponse.redirect(dest, 302);
 }
