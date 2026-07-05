@@ -628,6 +628,50 @@ async function handOutAccount(
     where: { platform, login: { not: null }, status: { in: ["warming", "active"] }, grants: { none: { status: "active" } } },
   });
   await sendOpsAlert(`🔑 ${app.candidate.fullName} was auto-handed ${platform}/${acct.handle} — ${left} left in the pool.`);
+  // Tell them to actually TURN the account into the model — pool accounts are
+  // dead/random-username profiles, and VAs won't do this without being told.
+  await sendProfileSetup(app.candidateId).catch(() => {});
+}
+
+/**
+ * The "make this account look like the model" step. Pool accounts arrive as
+ * random-username dead profiles, so — every time an account is handed over — spell
+ * out the profile setup (name → model, profile pic + banner from the content
+ * folder, promo link in the bio). Common sense to us, not to every VA; sending it
+ * automatically means you never have to say it again.
+ */
+async function sendProfileSetup(candidateId: string) {
+  const candidate = await prisma.candidate.findUnique({ where: { id: candidateId } });
+  if (!candidate?.telegramChatId) return;
+  const user = await prisma.user.findFirst({ where: { candidateId } });
+  if (!user) return;
+  const asg = await prisma.assignment.findFirst({
+    where: { userId: user.id, status: { in: ["probation", "active"] } },
+    orderBy: { createdAt: "desc" },
+    include: { creator: true, role: true },
+  });
+  if (!asg) return;
+  const model = asg.creator?.name ?? "your model";
+  let folder = asg.creator?.contentDriveUrl ?? "";
+  try {
+    const drives = asg.creator?.contentDrives ? JSON.parse(asg.creator.contentDrives) : {};
+    folder = drives[asg.role.key] ?? asg.creator?.contentDriveUrl ?? "";
+  } catch {
+    /* keep the general drive */
+  }
+  const link = asg.promoLink ?? "";
+  const body =
+    `✨ IMPORTANT — set the account up as ${model} BEFORE you post. A random-looking profile won't get subs, so do ALL of this first:\n\n` +
+    `• NAME → change the display name to "${model}"\n` +
+    `• PROFILE PICTURE → use a photo of ${model} from the content folder\n` +
+    `• BANNER / HEADER → set one from the folder too\n` +
+    `• BIO → write a short bio and put your promo link in it:\n${link || `(message me "link" and I'll send it)`}\n\n` +
+    `📁 Content folder: ${folder || `(message your manager for it)`}\n\n` +
+    `This is what turns a dead account into ${model} — do it before your first post 🔥`;
+  const r = await sendTelegramMessage(candidate.telegramChatId, body);
+  await prisma.message.create({
+    data: { candidateId, direction: "outbound", channel: "telegram", templateKey: "profile_setup", body, status: r.status },
+  });
 }
 
 /** Slug-safe first name for the promo link (e.g. "Ryan" → "ryan"). */
@@ -907,6 +951,8 @@ export async function deliverAccountLogin(
   await prisma.message.create({
     data: { candidateId: candidate.id, direction: "outbound", channel: "telegram", templateKey: "account_handout", body, status: r.status },
   });
+  // Always follow the login with the "turn it into the model" profile step.
+  await sendProfileSetup(candidate.id).catch(() => {});
   return { sent: true };
 }
 
