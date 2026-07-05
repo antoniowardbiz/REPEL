@@ -608,6 +608,36 @@ export async function ensurePromoLink(assignmentId: string, firstName: string) {
 }
 
 /**
+ * Rebuild a VA's promo link around a NEW name they've asked for (e.g. a persona
+ * name — "put Shan in my link instead"). Regenerates the /go slug + link so the
+ * name they post reads how they want, keeping the unique assignment suffix so it
+ * never collides. The old slug stops resolving, so the caller tells them to
+ * re-post the new one. Handles the class of request the bot used to escalate to
+ * a human. Returns the new link (null if no base URL / assignment) + clean name.
+ */
+export async function renamePromoLink(
+  assignmentId: string,
+  newName: string
+): Promise<{ link: string | null; displayName: string }> {
+  const displayName = newName.trim().replace(/\s+/g, " ").slice(0, 24);
+  const asg = await prisma.assignment.findUnique({ where: { id: assignmentId }, include: { user: true } });
+  if (!asg) return { link: null, displayName };
+  const base = (process.env.NEXT_PUBLIC_BASE_URL || "").replace(/\/$/, "");
+  const slug = `${promoSlugify(newName)}${asg.id.slice(-6)}`;
+  const link = base ? `${base}/go/${slug}` : "";
+  await prisma.assignment.update({
+    where: { id: assignmentId },
+    data: { trackSlug: slug, promoLink: link },
+  });
+  await auditLog("promo_link_renamed", "Assignment", assignmentId, { newName: displayName, slug });
+  // FYI to ops so you know this VA now goes by this name on their link — no action needed.
+  await sendOpsAlert(
+    `🔤 ${asg.user?.name ?? "A VA"} set their promo-link name to "${displayName}" (self-serve). New link: ${link || "(no base URL set)"}`
+  ).catch(() => {});
+  return { link: link || null, displayName };
+}
+
+/**
  * Generate a personal promo link for every current VA that's missing one — so
  * VAs hired before this feature (or before their model's OF link was set) get
  * theirs in one click. Idempotent: VAs who already have a slug are skipped.

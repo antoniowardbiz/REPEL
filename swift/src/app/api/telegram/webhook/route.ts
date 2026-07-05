@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { submitTrial, deliverStageMessage, routeToManagerForAccount, selectRole } from "@/lib/services";
+import { submitTrial, deliverStageMessage, routeToManagerForAccount, selectRole, renamePromoLink } from "@/lib/services";
 import { sendOpsAlert, sendTelegramMessage } from "@/lib/telegram";
 import { ROLE_PLATFORM } from "@/lib/roles-config";
 import { handleCandidateMessage } from "@/lib/ai-support";
@@ -30,6 +30,30 @@ const CODE_STRIP_RE = /\/?(2fa|otp|passcode|(?:login|verification|auth|2\s*facto
 // Account-check answers (has an account to use, or needs one set up).
 const YES_RE = /\b(yes|yep|yeah|yup|ya|i do|i have|have one|got one|got it|ready|affirmative|sure)\b/i;
 const NO_RE = /\b(no|nope|nah|don'?t|do not|haven'?t|need (?:one|an account|setup|set up)|not yet|new account)\b/i;
+// A VA asking to change the NAME shown in their tracked promo link (e.g. a
+// persona name). This is a request the bot used to escalate to a human.
+const LINK_RENAME_RE =
+  /\b(?:change|rename|update|switch|edit|fix)\b[^.!?]{0,40}\b(?:name|link)\b|\blink\s*name\b|\bput\s+["'“‘]?\w+["'”’]?\s+(?:instead|in\s+(?:the|my)\s+link)\b/i;
+
+/** Pull the requested new name out of a rename message. Prefers the LAST
+ *  "to <name>" target (so "change from Hustianei to Shan" → Shan, not Hustianei),
+ *  then "put <name>", then a quoted token. Null if unclear → the bot asks. */
+function extractNewLinkName(text: string): string | null {
+  const STOP = /^(the|my|a|an|it|this|that|link|name|change|instead|please|pls|thanks|ty|from|to|in|of|be|use|as)$/i;
+  const clean = (s: string) => s.replace(/^["'“‘]+|["'”’.!,]+$/g, "").trim();
+  // Explicit command we tell them to use: "link name Shan".
+  const cmd = text.match(/\blink\s*name\s+["'“‘]?([A-Za-z][A-Za-z0-9._-]{1,20})/i);
+  if (cmd && !STOP.test(clean(cmd[1]))) return clean(cmd[1]);
+  const tos = [...text.matchAll(/\bto\s+["'“‘]?([A-Za-z][A-Za-z0-9._-]{1,20})/gi)]
+    .map((m) => clean(m[1]))
+    .filter((n) => n && !STOP.test(n));
+  if (tos.length) return tos[tos.length - 1];
+  const put = text.match(/\bput\s+["'“‘]?([A-Za-z][A-Za-z0-9._-]{1,20})/i);
+  if (put && !STOP.test(clean(put[1]))) return clean(put[1]);
+  const q = text.match(/["'“‘]([A-Za-z][A-Za-z0-9 ._-]{0,20})["'”’]/);
+  if (q && !STOP.test(clean(q[1]))) return clean(q[1]);
+  return null;
+}
 const ok = () => NextResponse.json({ ok: true });
 
 // Which hostnames count as "on the role's platform" for a real submission.
@@ -356,6 +380,55 @@ export async function POST(req: Request) {
           `You don't have a promo link set yet — your manager will sort it 🙏`,
           "link_none"
         );
+      }
+      handled = true;
+    }
+
+    // ── "change the name in my link": a VA wants a different name (persona) in
+    // their tracked link. The bot used to escalate this to a human — now it
+    // regenerates their /go slug + link itself and tells them to re-post it.
+    if (!handled && text && LINK_RENAME_RE.test(text)) {
+      const user = await prisma.user.findFirst({ where: { candidateId: candidate.id } });
+      const asg = user
+        ? await prisma.assignment.findFirst({
+            where: { userId: user.id, status: { in: ["probation", "active"] } },
+            orderBy: { createdAt: "desc" },
+          })
+        : null;
+      if (!asg) {
+        await replyAndLog(
+          candidate.id,
+          chatId,
+          `I can set that up once you're assigned a model — your manager will confirm your details shortly 🙏`,
+          "link_rename_none"
+        );
+      } else {
+        const newName = extractNewLinkName(text);
+        if (!newName) {
+          await replyAndLog(
+            candidate.id,
+            chatId,
+            `Happy to change the name in your link 🙂 What would you like it to say? Reply e.g. "link name Shan".`,
+            "link_rename_ask"
+          );
+        } else {
+          const res = await renamePromoLink(asg.id, newName);
+          if (res.link) {
+            await replyAndLog(
+              candidate.id,
+              chatId,
+              `Done ✅ Your link now uses "${res.displayName}":\n\n${res.link}\n\n⚠️ Update it anywhere you've already posted it — the old link won't track anymore.`,
+              "link_rename_done"
+            );
+          } else {
+            await replyAndLog(
+              candidate.id,
+              chatId,
+              `I couldn't update that just now — your manager will sort it 🙏`,
+              "link_rename_fail"
+            );
+          }
+        }
       }
       handled = true;
     }
