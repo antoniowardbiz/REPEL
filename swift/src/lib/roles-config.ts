@@ -11,6 +11,12 @@ export type CreatorSeed = {
   igHandle?: string;
   tiktokHandle?: string;
   contentDriveUrl?: string;
+  // The model's OF FREE-TRIAL link (onlyfans.com/<user>/trial/<code>). This is the
+  // shared fallback a VA's /go link uses when they don't yet have their own pool
+  // link. It MUST be a real /trial/ link, never the bare paid profile — the seed
+  // stamps this value on every deploy, repairing a field that got mis-set by hand.
+  // Leave "" to not touch the DB value for that model.
+  ofTrialUrl?: string;
 };
 
 export const CREATORS: CreatorSeed[] = [
@@ -19,12 +25,14 @@ export const CREATORS: CreatorSeed[] = [
     niche: "X / Twitter growth",
     xMainUrl: "", // no active main X page currently
     contentDriveUrl: "", // <Lola Drive folder>
+    ofTrialUrl: "https://onlyfans.com/lola.bellexo/trial/rbtly7ismc2j6hfiecybqgubnunjxeps",
   },
   {
     name: "Lae",
     niche: "X / TikTok / Instagram",
     xMainUrl: "https://x.com/LaeDevereaux",
     contentDriveUrl: "https://drive.google.com/drive/folders/1ABHMTwixtxF2xfiu0-TLB38OtaxD4AfI",
+    ofTrialUrl: "", // <-- paste ONE Lae free-trial link here (onlyfans.com/laedevereaux/trial/<code>)
   },
 ];
 
