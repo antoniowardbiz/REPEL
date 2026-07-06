@@ -13,7 +13,7 @@ import { routeToFolderForStage } from "./folders";
 import { ensureTrialWatch } from "./watcher";
 import { assignVa } from "./distribution";
 import { resolveOpenRoleId } from "./capacity";
-import { ROLE_PAY, ROLE_TARGETS, ROLE_TRIAL_CONTENT, ROLE_PLATFORM } from "./roles-config";
+import { ROLE_PAY, ROLE_TARGETS, ROLE_TRIAL_CONTENT, ROLE_PLATFORM, CREATORS } from "./roles-config";
 import { claimNextAccount } from "./accounts";
 import { claimTrialLink } from "./trial-links";
 import { PLAYBOOKS } from "./playbooks-config";
@@ -731,6 +731,29 @@ export async function renamePromoLink(
     `🔤 ${asg.user?.name ?? "A VA"} set their promo-link name to "${displayName}" (self-serve). New link: ${link || "(no base URL set)"}`
   ).catch(() => {});
   return { link: link || null, displayName };
+}
+
+/**
+ * Stamp each model's OF free-trial link from config into the DB. The deploy's
+ * `start` script runs migrations but NOT the seed, so a stored ofTrialUrl that
+ * got mis-set to the paid profile URL would otherwise never be repaired on
+ * deploy — leaving /go's fallback pointing at the paywall. Runs on every boot
+ * (idempotent): only touches models whose config gives a non-empty link and
+ * whose stored value differs. This is what makes the free-trial fix self-heal.
+ */
+export async function repairModelTrialLinks(): Promise<{ repaired: number }> {
+  let repaired = 0;
+  for (const c of CREATORS) {
+    if (!c.ofTrialUrl) continue; // blank config = leave the DB value alone
+    const creator = await prisma.creator.findFirst({ where: { name: c.name } });
+    if (!creator || creator.ofTrialUrl === c.ofTrialUrl) continue;
+    await prisma.creator.update({ where: { id: creator.id }, data: { ofTrialUrl: c.ofTrialUrl } });
+    repaired++;
+  }
+  if (repaired > 0) {
+    await sendOpsAlert(`🔗 Repaired ${repaired} model free-trial link(s) from config on boot.`).catch(() => {});
+  }
+  return { repaired };
 }
 
 /**
