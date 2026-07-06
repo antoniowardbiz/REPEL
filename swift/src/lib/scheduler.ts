@@ -13,7 +13,7 @@ import { runStaleSweep } from "./stale";
 import { sendDailyDigest, sendMorningMessages } from "./daily";
 import { runDailyCoaching } from "./coaching";
 import { runSelfImprovement } from "./self-improve";
-import { backfillPromoLinks, sendPersonalLinks } from "./services";
+import { backfillPromoLinks, sendPersonalLinks, repairModelTrialLinks } from "./services";
 import { runWinback } from "./winback";
 import { autoClearScoring } from "./autoscore";
 
@@ -102,6 +102,10 @@ export function startScheduler() {
 
   // One pass shortly after boot so expired/overdue trials are caught promptly.
   setTimeout(() => safe("boot", runDeadlineChecks), 30_000);
+  // Repair each model's OF free-trial link from config FIRST (the deploy skips
+  // the seed), so /go's fallback points at the free trial — not the paid page —
+  // before anything else reads it.
+  setTimeout(() => safe("trial-link-repair", () => repairModelTrialLinks()), 15_000);
   // And generate any missing promo links right after boot, so a fresh deploy
   // immediately gives every active VA their tracked link (no button to click).
   setTimeout(() => safe("linkbackfill", () => backfillPromoLinks()), 20_000);
