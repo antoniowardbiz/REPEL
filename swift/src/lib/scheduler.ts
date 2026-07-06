@@ -15,6 +15,7 @@ import { runDailyCoaching } from "./coaching";
 import { runSelfImprovement } from "./self-improve";
 import { backfillPromoLinks, sendPersonalLinks, repairModelTrialLinks } from "./services";
 import { runWinback } from "./winback";
+import { runActivationDrive } from "./activation";
 import { autoClearScoring } from "./autoscore";
 
 const g = globalThis as unknown as { __swiftSchedulerStarted?: boolean };
@@ -24,6 +25,7 @@ const DIGEST_HOUR = Number(process.env.DIGEST_HOUR ?? 21);
 const COACH_HOUR = Number(process.env.COACH_HOUR ?? 20); // proactive VA coaching, once/day
 const LINKS_HOUR = Number(process.env.LINKS_HOUR ?? 9); // ensure every VA has + has received their link, once/day
 const WINBACK_HOUR = Number(process.env.WINBACK_HOUR ?? 10); // re-engage stalled/expired VAs, once/day
+const ACTIVATION_HOUR = Number(process.env.ACTIVATION_HOUR ?? 11); // push stalled pre-active VAs to START, once/day
 const IMPROVE_DAY = Number(process.env.IMPROVE_DAY ?? 1); // weekly self-improvement (0=Sun … 6=Sat, Mon default)
 const IMPROVE_HOUR = Number(process.env.IMPROVE_HOUR ?? 9);
 const TZ_OFFSET = Number(process.env.TZ_OFFSET ?? 0);
@@ -33,6 +35,7 @@ let lastDigestDay = "";
 let lastCoachDay = "";
 let lastLinksDay = "";
 let lastWinbackDay = "";
+let lastActivationDay = "";
 let lastImproveDay = "";
 
 function local() {
@@ -91,6 +94,12 @@ export function startScheduler() {
           lastWinbackDay = day;
           await runWinback();
         }
+        // Push stalled pre-active VAs (role-selected / training / trial-ready)
+        // to actually START — the bucket win-back doesn't reach until they expire.
+        if (h === ACTIVATION_HOUR && lastActivationDay !== day) {
+          lastActivationDay = day;
+          await runActivationDrive();
+        }
         // Weekly self-improvement pass (fires once, on IMPROVE_DAY at IMPROVE_HOUR).
         if (localDow() === IMPROVE_DAY && h === IMPROVE_HOUR && lastImproveDay !== day) {
           lastImproveDay = day;
@@ -109,8 +118,13 @@ export function startScheduler() {
   // And generate any missing promo links right after boot, so a fresh deploy
   // immediately gives every active VA their tracked link (no button to click).
   setTimeout(() => safe("linkbackfill", () => backfillPromoLinks()), 20_000);
+  // DM their link to any active VA who has one but was never sent it — so the
+  // "link but not sent" VAs can actually start posting without a manual click.
+  setTimeout(() => safe("sendlinks-boot", () => sendPersonalLinks({ onlyUnsent: true })), 30_000);
   // Clear any scoring backlog right after boot, and re-engage stalled VAs once,
   // so the fixes take effect immediately on this deploy (not only next cycle).
   setTimeout(() => safe("autoscore-boot", autoClearScoring), 25_000);
   setTimeout(() => safe("winback-boot", runWinback), 40_000);
+  // Push stalled pre-active VAs to start, once, right after boot.
+  setTimeout(() => safe("activation-boot", runActivationDrive), 50_000);
 }

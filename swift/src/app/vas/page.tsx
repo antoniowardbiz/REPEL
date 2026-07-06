@@ -9,6 +9,7 @@ import AssignmentPromoLink from "@/components/AssignmentPromoLink";
 import ModelLinksEditor from "@/components/ModelLinksEditor";
 import PromoBackfillButton from "@/components/PromoBackfillButton";
 import SendLinksButton from "@/components/SendLinksButton";
+import ActivationDriveButton from "@/components/ActivationDriveButton";
 import TrialLinkPool from "@/components/TrialLinkPool";
 import EarningsPanel from "@/components/EarningsPanel";
 import { trialLinkPoolStats } from "@/lib/trial-links";
@@ -224,6 +225,7 @@ export default async function VasPage() {
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <h2 className="font-display text-base font-semibold">Active assignments ({assignments.length})</h2>
           <div className="flex items-center gap-3">
+            <ActivationDriveButton />
             <SendLinksButton />
             <PromoBackfillButton />
           </div>
