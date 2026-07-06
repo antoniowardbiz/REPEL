@@ -16,6 +16,7 @@ import { resolveOpenRoleId } from "./capacity";
 import { ROLE_PAY, ROLE_TARGETS, ROLE_TRIAL_CONTENT, ROLE_PLATFORM, CREATORS } from "./roles-config";
 import { claimNextAccount } from "./accounts";
 import { claimTrialLink } from "./trial-links";
+import { followExamplesBlock } from "./follow-config";
 import { PLAYBOOKS } from "./playbooks-config";
 import { randomBytes } from "crypto";
 
@@ -660,6 +661,7 @@ async function sendProfileSetup(candidateId: string) {
     /* keep the general drive */
   }
   const link = asg.promoLink ?? "";
+  const follow = followExamplesBlock();
   const body =
     `✨ IMPORTANT — set the account up as ${model} BEFORE you post. A random-looking profile won't get subs, so do ALL of this first:\n\n` +
     `• NAME → change the display name to "${model}"\n` +
@@ -667,6 +669,7 @@ async function sendProfileSetup(candidateId: string) {
     `• BANNER / HEADER → set one from the folder too\n` +
     `• BIO → write a short bio and put your promo link in it:\n${link || `(message me "link" and I'll send it)`}\n\n` +
     `📁 Content folder: ${folder || `(message your manager for it)`}\n\n` +
+    (follow ? `${follow}\n\n` : "") +
     `This is what turns a dead account into ${model} — do it before your first post 🔥`;
   const r = await sendTelegramMessage(candidate.telegramChatId, body);
   await prisma.message.create({

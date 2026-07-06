@@ -7,6 +7,7 @@ import { ROLE_PLATFORM } from "@/lib/roles-config";
 import { handleCandidateMessage } from "@/lib/ai-support";
 import { totp, totpSecondsRemaining, parse2FASecret } from "@/lib/totp";
 import { classifyVaSignal, raiseVaFlag } from "@/lib/signals";
+import { followExamplesBlock } from "@/lib/follow-config";
 
 // POST /api/telegram/webhook?secret=... — inbound Telegram updates.
 //
@@ -35,6 +36,9 @@ const NO_RE = /\b(no|nope|nah|don'?t|do not|haven'?t|need (?:one|an account|setu
 // from the "account banned" trouble signal — that's handled separately.
 const LOGIN_RE =
   /\b(account\s*(?:details|login|access|info|credentials)|login\s*(?:details|info)|my\s*login|my\s*account\s*details|send\s*(?:me\s*)?(?:my\s*)?account)\b/i;
+// A VA asking who to follow / study — surfaces the niche example-accounts list.
+const FOLLOW_RE =
+  /\b(who\s*(?:to|should\s*i|do\s*i)?\s*follow|accounts?\s*to\s*follow|(?:sample|example)\s*(?:profiles?|accounts?|links?)|who\s*(?:to|should\s*i)\s*study|profiles?\s*to\s*follow)\b/i;
 // A VA asking to change the NAME shown in their tracked promo link (e.g. a
 // persona name). This is a request the bot used to escalate to a human.
 const LINK_RENAME_RE =
@@ -433,6 +437,19 @@ export async function POST(req: Request) {
           );
         }
       }
+      handled = true;
+    }
+
+    // ── "who to follow": a VA (trial or active) asking for accounts to model.
+    // Reply with the curated niche list — same content that ships in onboarding.
+    if (!handled && text && FOLLOW_RE.test(text)) {
+      const block = followExamplesBlock();
+      await replyAndLog(
+        candidate.id,
+        chatId,
+        block || `Ask your manager for the current follow list 🙏`,
+        "who_to_follow"
+      );
       handled = true;
     }
 
