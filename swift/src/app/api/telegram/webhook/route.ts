@@ -94,6 +94,102 @@ async function replyAndLog(candidateId: string, chatId: string, body: string, te
   });
 }
 
+// ── Operator command channel ─────────────────────────────────────────────────
+// Messages from an operator chat (the owner) are instructions to the bot, not
+// candidate replies. Allow-list is OPERATOR_CHAT_IDS (comma-separated) or, as a
+// fallback, the ops-alert chat OPS_TELEGRAM_CHAT_ID. DM the bot /chatid to learn
+// a chat's id.
+function isOperatorChat(chatId: string): boolean {
+  const ids = (process.env.OPERATOR_CHAT_IDS || process.env.OPS_TELEGRAM_CHAT_ID || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return ids.includes(chatId);
+}
+
+// Parse "message/tell/text/dm <name> [saying|that|:] <text>" → who + what.
+function parseOperatorRelay(text: string): { name: string; message: string } | null {
+  const m = text.trim().match(/^(?:message|msg|tell|text|dm|send|reply(?:\s+to)?|let)\s+([A-Za-z][A-Za-z0-9._'-]*)\s*[:,]?\s+([\s\S]+)$/i);
+  if (!m) return null;
+  const name = m[1];
+  let msg = m[2].trim().replace(/^(?:saying|say|that|to\s+say|know|:|-)\s+/i, "").trim();
+  if (!msg) return null;
+  return { name, message: msg };
+}
+
+// Relay an operator's message to a VA found by name; report back to the operator.
+async function handleOperatorRelay(opsChatId: string, name: string, message: string) {
+  const matches = await prisma.candidate.findMany({
+    where: { fullName: { contains: name }, archived: false },
+    orderBy: { updatedAt: "desc" },
+    take: 6,
+  });
+  if (matches.length === 0) {
+    await sendTelegramMessage(opsChatId, `⚠ No VA found matching "${name}".`);
+    return;
+  }
+  const reachable = matches.filter((c) => c.telegramChatId);
+  if (reachable.length === 0) {
+    await sendTelegramMessage(opsChatId, `⚠ Found ${matches[0].fullName} but they haven't messaged the bot yet — I have no chat to DM them.`);
+    return;
+  }
+  if (reachable.length > 1) {
+    const list = reachable.map((c) => `• ${c.fullName}`).join("\n");
+    await sendTelegramMessage(opsChatId, `⚠ "${name}" matches several VAs:\n${list}\n\nUse a fuller name so I message the right one.`);
+    return;
+  }
+  const target = reachable[0];
+  const r = await sendTelegramMessage(target.telegramChatId!, message);
+  await prisma.message.create({
+    data: { candidateId: target.id, direction: "outbound", channel: "telegram", templateKey: "operator_relay", body: message, status: r.status },
+  });
+  await sendTelegramMessage(opsChatId, `✅ Sent to ${target.fullName}:\n"${message}"`);
+}
+
+// Parse "message all [x|reddit] vas saying <text>" → which group + what.
+function parseOperatorBroadcast(text: string): { group: "x" | "reddit" | "all"; message: string } | null {
+  const m = text
+    .trim()
+    .match(/^(?:message|msg|tell|text|dm|send|broadcast)\s+all\s+(x|reddit|twitter)?\s*va'?s?\s*[:,]?\s*([\s\S]+)$/i);
+  if (!m) return null;
+  let group = (m[1] || "all").toLowerCase();
+  if (group === "twitter") group = "x";
+  const message = m[2].trim().replace(/^(?:saying|say|that|to\s+say|know|:|-)\s+/i, "").trim();
+  if (!message) return null;
+  return { group: group as "x" | "reddit" | "all", message };
+}
+
+// Broadcast a message to every active VA in a group (X, Reddit, or all).
+async function handleOperatorBroadcast(opsChatId: string, group: "x" | "reddit" | "all", message: string) {
+  const roleKeys = group === "x" ? ["x_va"] : group === "reddit" ? ["reddit_va"] : ["x_va", "reddit_va"];
+  const assignments = await prisma.assignment.findMany({
+    where: { status: { in: ["probation", "active"] }, role: { key: { in: roleKeys } } },
+    include: { user: { include: { fromCandidate: true } } },
+  });
+  const seen = new Set<string>();
+  let sent = 0;
+  let noChat = 0;
+  for (const a of assignments) {
+    const cand = a.user?.fromCandidate;
+    if (!cand?.telegramChatId) {
+      noChat++;
+      continue;
+    }
+    if (seen.has(cand.telegramChatId)) continue; // one VA can hold multiple assignments
+    seen.add(cand.telegramChatId);
+    const r = await sendTelegramMessage(cand.telegramChatId, message);
+    await prisma.message.create({
+      data: { candidateId: cand.id, direction: "outbound", channel: "telegram", templateKey: "operator_broadcast", body: message, status: r.status },
+    });
+    sent++;
+  }
+  const label = group === "all" ? "VAs" : `${group.toUpperCase()} VAs`;
+  await sendTelegramMessage(
+    opsChatId,
+    `✅ Broadcast sent to ${sent} ${label}${noChat ? ` (${noChat} haven't messaged the bot yet)` : ""}.`
+  );
+}
+
 export async function POST(req: Request) {
   const url = new URL(req.url);
   const secret = url.searchParams.get("secret");
@@ -122,6 +218,24 @@ export async function POST(req: Request) {
   }
 
   try {
+    // ── Operator commands ─────────────────────────────────────────────────────
+    // From the owner's chat, a message is an instruction to the bot: broadcast to
+    // a group ("message all x vas saying …") or relay to one VA ("message Stewart
+    // saying …"). Broadcast is checked first so "all x vas" isn't read as a name.
+    // Only intercepts a recognised command — anything else falls through.
+    if (typeof text === "string" && isOperatorChat(chatId)) {
+      const broadcast = parseOperatorBroadcast(text);
+      if (broadcast) {
+        await handleOperatorBroadcast(chatId, broadcast.group, broadcast.message);
+        return ok();
+      }
+      const relay = parseOperatorRelay(text);
+      if (relay) {
+        await handleOperatorRelay(chatId, relay.name, relay.message);
+        return ok();
+      }
+    }
+
     // ── /start <token> deep link ────────────────────────────────────────────
     const startMatch = typeof text === "string" ? text.match(/^\/start(?:\s+(\S+))?/i) : null;
     if (startMatch) {
