@@ -479,11 +479,12 @@ export async function POST(req: Request) {
         ? await prisma.assignment.findFirst({
             where: { userId: user.id, status: { in: ["probation", "active"] } },
             orderBy: { createdAt: "desc" },
-            include: { role: true },
+            include: { role: true, creator: true },
           })
         : null;
-      if (asg?.promoLink) {
-        const platform = ROLE_PLATFORM[asg.role.key];
+      const shareLink = asg?.trialLinkUrl || asg?.creator?.ofTrialUrl || "";
+      if (shareLink) {
+        const platform = ROLE_PLATFORM[asg!.role.key];
         const placement =
           platform === "x"
             ? "Put it in your X bio AND drop it in the comments of EVERY post."
@@ -493,7 +494,7 @@ export async function POST(req: Request) {
         await replyAndLog(
           candidate.id,
           chatId,
-          `🔗 Here's your personal promo link — post THIS to bring subs, it's tracked to you:\n\n${asg.promoLink}\n\n📍 ${placement}`,
+          `🔗 Here's your free-trial link — post THIS to bring subs:\n\n${shareLink}\n\n📍 ${placement}`,
           "link_resend"
         );
       } else {
