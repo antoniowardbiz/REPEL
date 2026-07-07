@@ -75,7 +75,9 @@ export default async function LinksPage() {
         // pool link is assigned, else a generic MODEL·PLATFORM so it's never blank.
         slot: a.trialLinkLabel || `${a.creator.name.toUpperCase()}·${platLabel.toUpperCase()}`,
         hasInflowwLabel: Boolean(a.trialLinkLabel),
-        link: a.promoLink ?? "",
+        // Show the RAW OnlyFans free-trial link the VA actually posts (their own
+        // Infloww link, else the model's shared trial link) — not the /go wrapper.
+        link: a.trialLinkUrl || a.creator.ofTrialUrl || "",
         subs: a.subs ?? 0,
         total: totalBy.get(a.userId) ?? 0,
         week: weekBy.get(a.userId) ?? 0,
@@ -101,21 +103,20 @@ export default async function LinksPage() {
 
   return (
     <div>
-      <h1 className="font-display text-2xl font-bold">Links &amp; Clicks</h1>
+      <h1 className="font-display text-2xl font-bold">Links &amp; Subs</h1>
       <p className="mb-4 text-sm text-muted">
-        Every VA&rsquo;s tracked link, whether it&rsquo;s been sent to them, and what it&rsquo;s driving —
-        subs first, then clicks.
+        Each VA&rsquo;s raw OnlyFans free-trial link (what they post), whether it&rsquo;s been sent to them,
+        and the subs it&rsquo;s driving.
       </p>
 
-      {/* How tracking works — the thing that trips everyone up */}
+      {/* How attribution works now */}
       <div className="mb-5 rounded-lg border border-brand/40 bg-brand/10 p-3 text-sm">
-        <span className="font-semibold text-white">Clicks &amp; subs only count the tracked link.</span>{" "}
+        <span className="font-semibold text-white">Subs are attributed in Infloww, by link.</span>{" "}
         <span className="text-muted">
-          A click logs when someone opens the VA&rsquo;s{" "}
-          <span className="font-mono text-[12px] text-white">/go/&hellip;</span> link; subs fill in when you
-          import Infloww earnings (matched by the slot label, e.g.{" "}
-          <span className="font-mono text-[12px] text-white">LOLA-X-1</span>). If a VA posts a raw OnlyFans
-          link instead, nothing shows here.
+          VAs post their <span className="text-white">raw OnlyFans free-trial link</span> directly (no wrapper).
+          Subs fill in here when you import Infloww earnings, matched by the slot label (e.g.{" "}
+          <span className="font-mono text-[12px] text-white">LOLA-X-1</span>). The Clicks column only counted
+          the old <span className="font-mono text-[12px] text-white">/go</span> links and will stay flat now.
         </span>
       </div>
 

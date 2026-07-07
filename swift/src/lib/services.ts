@@ -150,7 +150,7 @@ async function buildMergeContext(applicationId: string, extra?: Partial<MergeCon
       ? `${(process.env.NEXT_PUBLIC_BASE_URL || "").replace(/\/$/, "")}/playbook/${app.role.key}`
       : "",
     group_invite_url: groupInvite || app.role.trainingGroupUrl || "",
-    promo_link: assignment?.promoLink ?? "", // this VA's own Infloww OF tracking link (set at hire)
+    promo_link: assignment?.trialLinkUrl || creator?.ofTrialUrl || "", // the VA's RAW OnlyFans free-trial link — they post this directly (no /go wrapper)
     link_placement: assignment ? linkPlacement : "", // only once hired (they have a link to place)
     ...extra,
   };
@@ -660,7 +660,7 @@ async function sendProfileSetup(candidateId: string) {
   } catch {
     /* keep the general drive */
   }
-  const link = asg.promoLink ?? "";
+  const link = asg.trialLinkUrl || asg.creator?.ofTrialUrl || "";
   const follow = followExamplesBlock();
   const body =
     `✨ IMPORTANT — set the account up as ${model} BEFORE you post. A random-looking profile won't get subs, so do ALL of this first:\n\n` +
@@ -810,7 +810,7 @@ export async function sendPersonalLinks(opts?: { onlyUnsent?: boolean }): Promis
   await backfillPromoLinks().catch(() => {});
   const assignments = await prisma.assignment.findMany({
     where: { status: { in: ["probation", "active"] } },
-    include: { user: { include: { fromCandidate: true } }, role: true },
+    include: { user: { include: { fromCandidate: true } }, role: true, creator: true },
   });
   // When only sending to VAs who've never received their link (the automatic
   // daily job), look up who already got a personal_link message so we don't
@@ -829,7 +829,11 @@ export async function sendPersonalLinks(opts?: { onlyUnsent?: boolean }): Promis
   let skipped = 0;
   for (const a of assignments) {
     const cand = a.user?.fromCandidate;
-    if (!a.promoLink) {
+    // The VA posts their RAW OnlyFans free-trial link (their own Infloww link,
+    // else the model's shared trial link) — never the /go wrapper. Subs are
+    // attributed to them in Infloww by their link.
+    const link = a.trialLinkUrl || a.creator?.ofTrialUrl || "";
+    if (!link) {
       noLink++;
       continue;
     }
@@ -849,8 +853,8 @@ export async function sendPersonalLinks(opts?: { onlyUnsent?: boolean }): Promis
           ? "Put it in your Reddit bio so it sits on every post you make."
           : "Keep it in your bio so fans can always find it.";
     const body =
-      `🔗 ${firstNameOf(cand.fullName)}, here's your personal promo link — post THIS to bring subs, ` +
-      `it's tracked to you:\n\n${a.promoLink}\n\n📍 ${placement}`;
+      `🔗 ${firstNameOf(cand.fullName)}, here's your free-trial link — post THIS to bring subs:\n\n` +
+      `${link}\n\n📍 ${placement}`;
     const r = await sendTelegramMessage(cand.telegramChatId, body);
     await prisma.message.create({
       data: { candidateId: cand.id, direction: "outbound", channel: "telegram", templateKey: "personal_link", body, status: r.status },
