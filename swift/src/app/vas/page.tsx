@@ -5,7 +5,7 @@ import { AUTO_HIRE } from "@/lib/services";
 import { ROLE_PAY } from "@/lib/roles-config";
 import RoleCapacityEditor from "@/components/RoleCapacityEditor";
 import RolePayEditor from "@/components/RolePayEditor";
-import AssignmentPromoLink from "@/components/AssignmentPromoLink";
+import CopyLink from "@/components/CopyLink";
 import ModelLinksEditor from "@/components/ModelLinksEditor";
 import PromoBackfillButton from "@/components/PromoBackfillButton";
 import SendLinksButton from "@/components/SendLinksButton";
@@ -239,8 +239,8 @@ export default async function VasPage() {
                 <th className="px-3 py-2 text-left font-medium">Model</th>
                 <th className="px-3 py-2 text-left font-medium">Status</th>
                 <th className="px-3 py-2 text-right font-medium">Clicks</th>
-                <th className="px-3 py-2 text-left font-medium">Infloww link</th>
-                <th className="px-3 py-2 text-left font-medium">Promo link (auto)</th>
+                <th className="px-3 py-2 text-left font-medium">Slot</th>
+                <th className="px-3 py-2 text-left font-medium">OnlyFans link (what they post)</th>
               </tr>
             </thead>
             <tbody>
@@ -263,7 +263,7 @@ export default async function VasPage() {
                     )}
                   </td>
                   <td className="px-3 py-2" style={{ minWidth: 220 }}>
-                    <AssignmentPromoLink id={a.id} promoLink={a.promoLink ?? ""} />
+                    <CopyLink url={a.trialLinkUrl || a.creator.ofTrialUrl || ""} />
                   </td>
                 </tr>
               ))}

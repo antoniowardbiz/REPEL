@@ -853,8 +853,10 @@ export async function sendPersonalLinks(opts?: { onlyUnsent?: boolean }): Promis
           ? "Put it in your Reddit bio so it sits on every post you make."
           : "Keep it in your bio so fans can always find it.";
     const body =
-      `🔗 ${firstNameOf(cand.fullName)}, here's your free-trial link — post THIS to bring subs:\n\n` +
-      `${link}\n\n📍 ${placement}`;
+      `🔗 ${firstNameOf(cand.fullName)} — this is your NEW link. Use ONLY this one from now on:\n\n` +
+      `${link}\n\n` +
+      `✅ It's a clean OnlyFans link — looks legit, loads instantly and converts better, so you'll pull more subs from the same traffic. It's also how we track your results now, so every sub you bring is credited to you.\n\n` +
+      `📍 Add this to your bio right now. ${placement} If you've got any old link anywhere, delete it and use only this one.`;
     const r = await sendTelegramMessage(cand.telegramChatId, body);
     await prisma.message.create({
       data: { candidateId: cand.id, direction: "outbound", channel: "telegram", templateKey: "personal_link", body, status: r.status },
