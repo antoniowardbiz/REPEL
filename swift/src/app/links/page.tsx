@@ -27,7 +27,7 @@ const PLATFORM_LABEL: Record<string, string> = {
 export default async function LinksPage() {
   const weekAgo = new Date(Date.now() - 7 * DAY);
 
-  const [assignments, totalAgg, weekAgg, lastAgg, sentAgg] = await Promise.all([
+  const [assignments, totalAgg, weekAgg, lastAgg, sentAgg, repliedCandidates] = await Promise.all([
     prisma.assignment.findMany({
       where: { status: { in: ["probation", "active"] } },
       include: { user: { include: { fromCandidate: true } }, creator: true, role: true },
@@ -53,6 +53,13 @@ export default async function LinksPage() {
       by: ["candidateId"],
       where: { templateKey: "personal_link" },
       _max: { createdAt: true },
+    }),
+    // Everyone who has EVER replied to the bot — telegramChatId is set the first
+    // time a candidate DMs it. All stages, including archived, for outreach.
+    prisma.candidate.findMany({
+      where: { telegramChatId: { not: null } },
+      select: { id: true, fullName: true, telegramHandle: true, currentStage: true, archived: true },
+      orderBy: { updatedAt: "desc" },
     }),
   ]);
 
@@ -122,6 +129,60 @@ export default async function LinksPage() {
           the old <span className="font-mono text-[12px] text-white">/go</span> links and will stay flat now.
         </span>
       </div>
+
+      {/* Everyone who's ever replied to the bot — all stages, for outreach */}
+      <section className="card mb-5 p-4">
+        <div className="mb-1 flex items-center justify-between">
+          <h2 className="font-display text-base font-semibold">
+            Everyone who&rsquo;s messaged the bot ({repliedCandidates.length})
+          </h2>
+          <span className="text-[11px] text-faint">
+            {repliedCandidates.filter((c) => c.telegramHandle).length} with an @handle
+          </span>
+        </div>
+        <p className="mb-3 text-xs text-muted">
+          Every candidate who has ever replied to the bot — every stage, including archived. Tap a handle to
+          open the chat and message them personally.
+        </p>
+        <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
+          {repliedCandidates.map((c) => {
+            const handle = c.telegramHandle
+              ? c.telegramHandle.startsWith("@")
+                ? c.telegramHandle
+                : `@${c.telegramHandle}`
+              : "";
+            return (
+              <div
+                key={c.id}
+                className="flex items-center justify-between gap-2 rounded-lg border border-line bg-panel2 px-3 py-2"
+              >
+                <div className="min-w-0">
+                  <div className="truncate text-sm font-medium">{c.fullName}</div>
+                  <div className="text-[11px] text-faint">
+                    {c.currentStage.replace(/_/g, " ").toLowerCase()}
+                    {c.archived ? " · archived" : ""}
+                  </div>
+                </div>
+                {handle ? (
+                  <a
+                    href={`https://t.me/${handle.replace(/^@/, "")}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="shrink-0 font-mono text-[12px] text-brand hover:underline"
+                  >
+                    {handle}
+                  </a>
+                ) : (
+                  <span className="shrink-0 text-[11px] text-faint">no @username</span>
+                )}
+              </div>
+            );
+          })}
+          {repliedCandidates.length === 0 && (
+            <p className="text-sm text-muted">Nobody has messaged the bot yet.</p>
+          )}
+        </div>
+      </section>
 
       {/* VA Telegram handles — for personal outreach */}
       <section className="card mb-5 p-4">
