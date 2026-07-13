@@ -30,7 +30,7 @@ export default async function LinksPage() {
   const [assignments, totalAgg, weekAgg, lastAgg, sentAgg] = await Promise.all([
     prisma.assignment.findMany({
       where: { status: { in: ["probation", "active"] } },
-      include: { user: true, creator: true, role: true },
+      include: { user: { include: { fromCandidate: true } }, creator: true, role: true },
     }),
     prisma.activityEvent.groupBy({
       by: ["userId"],
@@ -68,6 +68,9 @@ export default async function LinksPage() {
       return {
         id: a.id,
         name: a.user.name,
+        // Telegram handle for personal outreach — from the User, else the
+        // candidate record it was created from (captured at apply time).
+        telegram: a.user.telegramHandle || a.user.fromCandidate?.telegramHandle || "",
         model: a.creator.name,
         platform,
         platLabel,
@@ -119,6 +122,48 @@ export default async function LinksPage() {
           the old <span className="font-mono text-[12px] text-white">/go</span> links and will stay flat now.
         </span>
       </div>
+
+      {/* VA Telegram handles — for personal outreach */}
+      <section className="card mb-5 p-4">
+        <div className="mb-1 flex items-center justify-between">
+          <h2 className="font-display text-base font-semibold">VA Telegram handles ({rows.length})</h2>
+          <span className="text-[11px] text-faint">{rows.filter((r) => r.telegram).length} with a handle</span>
+        </div>
+        <p className="mb-3 text-xs text-muted">
+          Reach out personally — tap a handle to open the chat. The bot still runs its automations in the
+          background; this is just for your own 1:1 messages.
+        </p>
+        <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
+          {rows.map((r) => {
+            const handle = r.telegram ? (r.telegram.startsWith("@") ? r.telegram : `@${r.telegram}`) : "";
+            return (
+              <div
+                key={r.id}
+                className="flex items-center justify-between gap-2 rounded-lg border border-line bg-panel2 px-3 py-2"
+              >
+                <div className="min-w-0">
+                  <div className="truncate text-sm font-medium">{r.name}</div>
+                  <div className="text-[11px] text-faint">
+                    {r.model} · {r.platLabel}
+                  </div>
+                </div>
+                {handle ? (
+                  <a
+                    href={`https://t.me/${handle.replace(/^@/, "")}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="shrink-0 font-mono text-[12px] text-brand hover:underline"
+                  >
+                    {handle}
+                  </a>
+                ) : (
+                  <span className="shrink-0 text-[11px] text-faint">no handle</span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </section>
 
       {/* Summary tiles */}
       <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
